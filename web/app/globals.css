@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+:root {
+  /* Vermont Signal Colors - Dark & Bold (Navy/Gold) */
+  --color-navy: #0f1c3f;
+  --color-gold: #d4a574;
+  --color-background: #FAFBFC;
+  --color-text: #2d2d2d;
+  --color-text-light: #6b7280;
+
+  --font-playfair: var(--font-playfair);
+  --font-work-sans: var(--font-work-sans);
+}
+
+@theme inline {
+  --font-sans: var(--font-work-sans);
+  --font-serif: var(--font-playfair);
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-text);
+  font-family: var(--font-work-sans), -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-playfair), Georgia, serif;
+  color: var(--color-navy);
+}

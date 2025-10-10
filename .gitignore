@@ -1,0 +1,64 @@
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints
+
+# Data files
+vermont_news_analyzer/data/input/*
+!vermont_news_analyzer/data/input/.gitkeep
+vermont_news_analyzer/data/output/*
+!vermont_news_analyzer/data/output/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# spaCy models
+*.bin
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Next.js
+web/.next/
+web/out/
+web/node_modules/
+web/.turbo/
+web/dist/

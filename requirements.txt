@@ -1,0 +1,72 @@
+# Vermont News Analyzer Pipeline - Python Dependencies
+# Multi-tiered fact extraction pipeline with LLM ensemble and NLP validation
+
+# ============================================================================
+# Core Dependencies
+# ============================================================================
+python-dotenv>=1.0.0          # Environment variable management
+
+# ============================================================================
+# LLM API Clients (Tier 1)
+# ============================================================================
+anthropic>=0.39.0             # Claude API client
+google-generativeai>=0.8.0    # Gemini API client
+openai>=1.54.0                # GPT-4o-mini API client
+
+# ============================================================================
+# Text Processing & Ingestion (Tier 1)
+# ============================================================================
+beautifulsoup4>=4.12.0        # HTML parsing and cleaning
+lxml>=5.0.0                   # XML/HTML parser (faster than html.parser)
+newspaper3k>=0.2.8            # Article extraction from URLs
+# Note: newspaper3k may require: pip install newspaper3k pillow
+
+# ============================================================================
+# NLP & Entity Recognition (Tier 3)
+# ============================================================================
+spacy>=3.7.0                  # High-precision NER
+# Note: After installing, download transformer model:
+# python -m spacy download en_core_web_trf
+
+# ============================================================================
+# Validation & Embeddings (Tier 2)
+# ============================================================================
+sentence-transformers>=3.0.0  # Sentence embeddings for similarity
+scikit-learn>=1.5.0           # Cosine similarity, vectorization
+numpy>=1.26.0                 # Numerical operations
+
+# ============================================================================
+# Topic Modeling (Tier 3)
+# ============================================================================
+bertopic>=0.16.0              # BERT-based topic modeling
+# BERTopic dependencies (usually auto-installed):
+# - umap-learn
+# - hdbscan
+# - sentence-transformers (already listed)
+
+# ============================================================================
+# Knowledge Base Enrichment (Tier 4)
+# ============================================================================
+requests>=2.32.0              # HTTP requests for Wikidata API
+# Note: For more advanced Wikidata queries, consider:
+# wikidata>=0.7.0
+# SPARQLWrapper>=2.0.0
+
+# ============================================================================
+# Data Handling
+# ============================================================================
+pandas>=2.2.0                 # Data manipulation (used by BERTopic)
+
+# ============================================================================
+# Development & Testing (Optional)
+# ============================================================================
+# pytest>=8.0.0               # Testing framework
+# black>=24.0.0               # Code formatting
+# flake8>=7.0.0               # Linting
+# mypy>=1.8.0                 # Type checking
+
+# ============================================================================
+# Deployment (fly.io)
+# ============================================================================
+# gunicorn>=22.0.0            # WSGI server (if adding web interface)
+# uvicorn>=0.30.0             # ASGI server (if using FastAPI)
