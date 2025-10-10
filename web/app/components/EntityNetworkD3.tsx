@@ -34,7 +34,6 @@ export default function EntityNetworkD3({
 }: EntityNetworkProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
 
   // Detect mobile viewport
@@ -143,10 +142,13 @@ export default function EntityNetworkD3({
       .selectAll('g')
       .data(nodes)
       .join('g')
-      .call(d3.drag<SVGGElement, Node>()
-        .on('start', dragstarted)
-        .on('drag', dragged)
-        .on('end', dragended) as any);
+      .call(
+        d3.drag<SVGGElement, Node>()
+          .on('start', dragstarted)
+          .on('drag', dragged)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .on('end', dragended) as any
+      );
 
     // Add circles to nodes with tinted fill
     node.append('circle')
@@ -164,11 +166,11 @@ export default function EntityNetworkD3({
       .style('filter', 'drop-shadow(0px 2px 4px rgba(0,0,0,0.1))');
 
     // Helper function to wrap text
-    function wrapText(text: any, width: number) {
+    function wrapText(text: d3.Selection<SVGTextElement, Node, SVGGElement, unknown>) {
       text.each(function(this: SVGTextElement, d: Node) {
         const textElement = d3.select(this);
         const words = d.label.split(/\s+/);
-        const dy = parseFloat(textElement.attr('dy') || 0);
+        const dy = parseFloat(textElement.attr('dy') || '0');
 
         textElement.text(null);
 
@@ -204,7 +206,7 @@ export default function EntityNetworkD3({
     const fontSize = isMobile ? 12 : 11;
     const typeFontSize = isMobile ? 10 : 9;
 
-    const labels = node.append('text')
+    node.append('text')
       .attr('text-anchor', 'middle')
       .attr('y', 0)
       .attr('dy', 0)
@@ -212,7 +214,7 @@ export default function EntityNetworkD3({
       .attr('font-weight', 600)
       .attr('fill', d => entityColors[d.type])
       .style('pointer-events', 'none')
-      .call(wrapText, isMobile ? 100 : 80);
+      .call(wrapText);
 
     // Add type labels (below name, inside circle)
     node.append('text')
@@ -226,8 +228,7 @@ export default function EntityNetworkD3({
     // Hover and click effects
     node
       .style('cursor', 'pointer')
-      .on('mouseenter touchstart', function(event, d) {
-        setHoveredNode(d.id);
+      .on('mouseenter touchstart', function() {
         d3.select(this).select('circle')
           .transition()
           .duration(200)
@@ -235,7 +236,6 @@ export default function EntityNetworkD3({
           .attr('stroke-width', isMobile ? 5 : 4);
       })
       .on('mouseleave touchend', function() {
-        setHoveredNode(null);
         d3.select(this).select('circle')
           .transition()
           .duration(200)
@@ -266,18 +266,18 @@ export default function EntityNetworkD3({
     });
 
     // Drag functions
-    function dragstarted(event: any, d: Node) {
+    function dragstarted(event: d3.D3DragEvent<SVGGElement, Node, Node>, d: Node) {
       if (!event.active) simulation.alphaTarget(0.3).restart();
       d.fx = d.x;
       d.fy = d.y;
     }
 
-    function dragged(event: any, d: Node) {
+    function dragged(event: d3.D3DragEvent<SVGGElement, Node, Node>, d: Node) {
       d.fx = event.x;
       d.fy = event.y;
     }
 
-    function dragended(event: any, d: Node) {
+    function dragended(event: d3.D3DragEvent<SVGGElement, Node, Node>, d: Node) {
       if (!event.active) simulation.alphaTarget(0);
       d.fx = null;
       d.fy = null;

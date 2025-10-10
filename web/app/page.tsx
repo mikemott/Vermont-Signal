@@ -4,7 +4,10 @@ import { useState } from 'react';
 import { SignalIcon } from './components/SignalIcon';
 import EntityNetworkD3 from './components/EntityNetworkD3';
 import EntityDetailsPanel, { EntityData } from './components/EntityDetailsPanel';
+import ArticleLibrary from './components/ArticleLibrary';
+import ArticleDetailsPanel from './components/ArticleDetailsPanel';
 import { enrichedEntityData } from './data/enrichedEntityData';
+import { Article } from './data/sampleArticles';
 
 type TabView = 'article' | 'network' | 'topics' | 'models';
 
@@ -52,6 +55,7 @@ const entityColors = {
 export default function VermontSignal() {
   const [activeTab, setActiveTab] = useState<TabView>('article');
   const [selectedEntity, setSelectedEntity] = useState<EntityData | null>(null);
+  const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
 
   const tabs = [
     { id: 'article' as TabView, label: 'Article Intelligence' },
@@ -101,7 +105,7 @@ export default function VermontSignal() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-6 py-8">
-        {activeTab === 'article' && <ArticleIntelligence />}
+        {activeTab === 'article' && <ArticleIntelligence onArticleClick={setSelectedArticle} />}
         {activeTab === 'network' && <EntityNetwork selectedEntity={selectedEntity} setSelectedEntity={setSelectedEntity} />}
         {activeTab === 'topics' && <TopicsTrends />}
         {activeTab === 'models' && <CompareModels />}
@@ -113,25 +117,23 @@ export default function VermontSignal() {
         onClose={() => setSelectedEntity(null)}
         entityColors={entityColors}
       />
+
+      {/* Article Details Panel */}
+      <ArticleDetailsPanel
+        article={selectedArticle}
+        onClose={() => setSelectedArticle(null)}
+        entityColors={entityColors}
+      />
     </div>
   );
 }
 
 // Placeholder components for each view
-function ArticleIntelligence() {
-  return (
-    <div className="space-y-8">
-      <h2 className="text-3xl font-bold text-[#0f1c3f]">Article Intelligence</h2>
-      <div className="bg-white p-8 border-l-4 border-[#d4a574] shadow-sm">
-        <p className="text-lg leading-relaxed">
-          Multi-model fact extraction pipeline powered by Claude, Gemini, and GPT.
-        </p>
-      </div>
-    </div>
-  );
+function ArticleIntelligence({ onArticleClick }: { onArticleClick: (article: Article) => void }) {
+  return <ArticleLibrary entityColors={entityColors} onArticleClick={onArticleClick} />;
 }
 
-function EntityNetwork({ selectedEntity, setSelectedEntity }: { selectedEntity: EntityData | null, setSelectedEntity: (entity: EntityData | null) => void }) {
+function EntityNetwork({ setSelectedEntity }: { selectedEntity: EntityData | null, setSelectedEntity: (entity: EntityData | null) => void }) {
   const handleEntityClick = (entityId: string) => {
     const entityData = enrichedEntityData[entityId];
     if (entityData) {
