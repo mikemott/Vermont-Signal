@@ -17,6 +17,11 @@ const workSans = Work_Sans({
 export const metadata: Metadata = {
   title: "Vermont Signal",
   description: "News intelligence and fact extraction pipeline",
+  icons: {
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+    ],
+  },
 };
 
 export default function RootLayout({

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { SignalIcon } from './components/SignalIcon';
 
 type TabView = 'article' | 'network' | 'topics' | 'models';
 
@@ -16,12 +17,20 @@ export default function VermontSignal() {
 
   return (
     <div className="min-h-screen">
+      {/* Design Label */}
+      <div className="bg-[#0f1c3f] text-white py-2 px-6 text-sm text-center">
+        Original Design (Navy/Gold) - <a href="/design3" className="underline">View Alternative Design</a>
+      </div>
+
       {/* Header */}
       <header className="border-b-4 border-[#0f1c3f] pb-4 pt-8">
         <div className="max-w-7xl mx-auto px-6">
-          <h1 className="text-6xl font-black text-center text-[#0f1c3f] tracking-tight">
-            VERMONT SIGNAL
-          </h1>
+          <div className="flex items-center justify-center gap-5">
+            <SignalIcon className="w-16 h-16" />
+            <h1 className="text-6xl font-black text-[#0f1c3f] tracking-tight">
+              Vermont Signal
+            </h1>
+          </div>
         </div>
       </header>
 
