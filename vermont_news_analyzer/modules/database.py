@@ -17,6 +17,11 @@ logger = logging.getLogger(__name__)
 class DatabaseConfig:
     """Database configuration from environment variables"""
 
+    # Support Railway's DATABASE_URL (single connection string)
+    # Format: postgresql://user:password@host:port/database
+    DATABASE_URL = os.getenv('DATABASE_URL')
+
+    # Also support individual environment variables (for local dev)
     HOST = os.getenv('DATABASE_HOST', 'localhost')
     PORT = os.getenv('DATABASE_PORT', '5432')
     DATABASE = os.getenv('DATABASE_NAME', 'vermont_signal_v2')
@@ -43,24 +48,40 @@ class VermontSignalDatabase:
 
         Args:
             db_config: Optional dict with host, database, user, password
+                      Or None to use environment variables
         """
         if db_config is None:
-            db_config = {
-                'host': DatabaseConfig.HOST,
-                'port': DatabaseConfig.PORT,
-                'database': DatabaseConfig.DATABASE,
-                'user': DatabaseConfig.USER,
-                'password': DatabaseConfig.PASSWORD
-            }
+            # Check if DATABASE_URL is set (Railway format)
+            if DatabaseConfig.DATABASE_URL:
+                self.db_config = None  # Will use DATABASE_URL directly
+                self.database_url = DatabaseConfig.DATABASE_URL
+            else:
+                # Use individual environment variables (local dev)
+                self.db_config = {
+                    'host': DatabaseConfig.HOST,
+                    'port': DatabaseConfig.PORT,
+                    'database': DatabaseConfig.DATABASE,
+                    'user': DatabaseConfig.USER,
+                    'password': DatabaseConfig.PASSWORD
+                }
+                self.database_url = None
+        else:
+            self.db_config = db_config
+            self.database_url = None
 
-        self.db_config = db_config
         self.conn = None
 
     def connect(self):
         """Establish database connection"""
         try:
-            self.conn = psycopg2.connect(**self.db_config)
-            logger.info(f"Connected to database: {self.db_config['database']}")
+            if self.database_url:
+                # Connect using DATABASE_URL (Railway/Heroku style)
+                self.conn = psycopg2.connect(self.database_url)
+                logger.info(f"Connected to database via DATABASE_URL")
+            else:
+                # Connect using individual parameters
+                self.conn = psycopg2.connect(**self.db_config)
+                logger.info(f"Connected to database: {self.db_config['database']}")
         except Exception as e:
             logger.error(f"Database connection failed: {e}")
             raise
