@@ -1,0 +1,303 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import * as d3 from 'd3';
+
+interface Node extends d3.SimulationNodeDatum {
+  id: string;
+  label: string;
+  type: string;
+}
+
+interface Link extends d3.SimulationLinkDatum<Node> {
+  source: string | Node;
+  target: string | Node;
+  label: string;
+}
+
+interface EntityNetworkProps {
+  entities: Array<{ id: string; label: string; type: string }>;
+  connections: Array<{ source: string; target: string; label: string }>;
+  entityColors: Record<string, string>;
+  width?: number;
+  height?: number;
+  onEntityClick?: (entityId: string) => void;
+}
+
+export default function EntityNetworkD3({
+  entities,
+  connections,
+  entityColors,
+  width = 1200,
+  height = 600,
+  onEntityClick,
+}: EntityNetworkProps) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Detect mobile viewport
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  useEffect(() => {
+    if (!svgRef.current || !containerRef.current) return;
+
+    // Clear previous content
+    d3.select(svgRef.current).selectAll('*').remove();
+
+    // Responsive dimensions
+    const containerWidth = containerRef.current.clientWidth;
+    const svgWidth = containerWidth;
+    const svgHeight = isMobile ? 400 : 600;
+    const nodeRadius = isMobile ? 60 : 50;
+    const nodeHoverRadius = isMobile ? 70 : 55;
+
+    // Create SVG
+    const svg = d3.select(svgRef.current)
+      .attr('width', '100%')
+      .attr('height', svgHeight)
+      .attr('viewBox', [0, 0, svgWidth, svgHeight]);
+
+    // Create data structures
+    const nodes: Node[] = entities.map(e => ({
+      id: e.id,
+      label: e.label,
+      type: e.type,
+    }));
+
+    const links: Link[] = connections.map(c => ({
+      source: c.source,
+      target: c.target,
+      label: c.label,
+    }));
+
+    // Create force simulation with responsive parameters
+    const linkDistance = isMobile ? 120 : 180;
+    const chargeStrength = isMobile ? -600 : -1000;
+    const collisionRadius = isMobile ? 80 : 70;
+
+    const simulation = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink<Node, Link>(links)
+        .id(d => d.id)
+        .distance(linkDistance))
+      .force('charge', d3.forceManyBody().strength(chargeStrength))
+      .force('center', d3.forceCenter(svgWidth / 2, svgHeight / 2))
+      .force('collision', d3.forceCollide().radius(collisionRadius));
+
+    // Create container for zoom
+    const g = svg.append('g');
+
+    // Add zoom behavior
+    const zoom = d3.zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.5, 3])
+      .on('zoom', (event) => {
+        g.attr('transform', event.transform);
+      });
+
+    svg.call(zoom);
+
+    // Create arrow marker
+    const arrowRefX = isMobile ? 40 : 35;
+    svg.append('defs').append('marker')
+      .attr('id', 'arrowhead')
+      .attr('viewBox', '-0 -5 10 10')
+      .attr('refX', arrowRefX)
+      .attr('refY', 0)
+      .attr('orient', 'auto')
+      .attr('markerWidth', 8)
+      .attr('markerHeight', 8)
+      .append('path')
+      .attr('d', 'M 0,-5 L 10,0 L 0,5')
+      .attr('fill', '#e8e3db');
+
+    // Create links
+    const link = g.append('g')
+      .selectAll('line')
+      .data(links)
+      .join('line')
+      .attr('stroke', '#e8e3db')
+      .attr('stroke-width', 2)
+      .attr('marker-end', 'url(#arrowhead)');
+
+    // Create link labels
+    const linkLabel = g.append('g')
+      .selectAll('text')
+      .data(links)
+      .join('text')
+      .attr('font-size', 10)
+      .attr('fill', '#6b7280')
+      .attr('text-anchor', 'middle')
+      .attr('dy', -5)
+      .text(d => d.label);
+
+    // Create node groups
+    const node = g.append('g')
+      .selectAll('g')
+      .data(nodes)
+      .join('g')
+      .call(d3.drag<SVGGElement, Node>()
+        .on('start', dragstarted)
+        .on('drag', dragged)
+        .on('end', dragended) as any);
+
+    // Add circles to nodes with tinted fill
+    node.append('circle')
+      .attr('r', nodeRadius)
+      .attr('fill', d => {
+        const color = entityColors[d.type];
+        // Convert hex to rgba with transparency
+        const r = parseInt(color.slice(1, 3), 16);
+        const g = parseInt(color.slice(3, 5), 16);
+        const b = parseInt(color.slice(5, 7), 16);
+        return `rgba(${r}, ${g}, ${b}, 0.1)`;
+      })
+      .attr('stroke', d => entityColors[d.type])
+      .attr('stroke-width', isMobile ? 4 : 3)
+      .style('filter', 'drop-shadow(0px 2px 4px rgba(0,0,0,0.1))');
+
+    // Helper function to wrap text
+    function wrapText(text: any, width: number) {
+      text.each(function(this: SVGTextElement, d: Node) {
+        const textElement = d3.select(this);
+        const words = d.label.split(/\s+/);
+        const dy = parseFloat(textElement.attr('dy') || 0);
+
+        textElement.text(null);
+
+        // If single word or short, just display it
+        if (words.length === 1 || d.label.length < 15) {
+          textElement.append('tspan')
+            .attr('x', 0)
+            .attr('y', -3)
+            .attr('dy', dy + 'em')
+            .text(d.label);
+        } else {
+          // Split into two lines for better fit
+          const midpoint = Math.ceil(words.length / 2);
+          const line1 = words.slice(0, midpoint).join(' ');
+          const line2 = words.slice(midpoint).join(' ');
+
+          textElement.append('tspan')
+            .attr('x', 0)
+            .attr('y', -8)
+            .attr('dy', dy + 'em')
+            .text(line1);
+
+          textElement.append('tspan')
+            .attr('x', 0)
+            .attr('y', -8)
+            .attr('dy', (1.1 + dy) + 'em')
+            .text(line2);
+        }
+      });
+    }
+
+    // Add labels to nodes (inside circles)
+    const fontSize = isMobile ? 12 : 11;
+    const typeFontSize = isMobile ? 10 : 9;
+
+    const labels = node.append('text')
+      .attr('text-anchor', 'middle')
+      .attr('y', 0)
+      .attr('dy', 0)
+      .attr('font-size', fontSize)
+      .attr('font-weight', 600)
+      .attr('fill', d => entityColors[d.type])
+      .style('pointer-events', 'none')
+      .call(wrapText, isMobile ? 100 : 80);
+
+    // Add type labels (below name, inside circle)
+    node.append('text')
+      .attr('text-anchor', 'middle')
+      .attr('dy', isMobile ? 24 : 20)
+      .attr('font-size', typeFontSize)
+      .attr('fill', '#6b7280')
+      .text(d => d.type)
+      .style('pointer-events', 'none');
+
+    // Hover and click effects
+    node
+      .style('cursor', 'pointer')
+      .on('mouseenter touchstart', function(event, d) {
+        setHoveredNode(d.id);
+        d3.select(this).select('circle')
+          .transition()
+          .duration(200)
+          .attr('r', nodeHoverRadius)
+          .attr('stroke-width', isMobile ? 5 : 4);
+      })
+      .on('mouseleave touchend', function() {
+        setHoveredNode(null);
+        d3.select(this).select('circle')
+          .transition()
+          .duration(200)
+          .attr('r', nodeRadius)
+          .attr('stroke-width', isMobile ? 4 : 3);
+      })
+      .on('click', function(event, d) {
+        event.stopPropagation();
+        event.preventDefault();
+        if (onEntityClick) {
+          onEntityClick(d.id);
+        }
+      });
+
+    // Update positions on tick
+    simulation.on('tick', () => {
+      link
+        .attr('x1', d => (d.source as Node).x!)
+        .attr('y1', d => (d.source as Node).y!)
+        .attr('x2', d => (d.target as Node).x!)
+        .attr('y2', d => (d.target as Node).y!);
+
+      linkLabel
+        .attr('x', d => ((d.source as Node).x! + (d.target as Node).x!) / 2)
+        .attr('y', d => ((d.source as Node).y! + (d.target as Node).y!) / 2);
+
+      node.attr('transform', d => `translate(${d.x},${d.y})`);
+    });
+
+    // Drag functions
+    function dragstarted(event: any, d: Node) {
+      if (!event.active) simulation.alphaTarget(0.3).restart();
+      d.fx = d.x;
+      d.fy = d.y;
+    }
+
+    function dragged(event: any, d: Node) {
+      d.fx = event.x;
+      d.fy = event.y;
+    }
+
+    function dragended(event: any, d: Node) {
+      if (!event.active) simulation.alphaTarget(0);
+      d.fx = null;
+      d.fy = null;
+    }
+
+    return () => {
+      simulation.stop();
+    };
+  }, [entities, connections, entityColors, width, height, onEntityClick, isMobile]);
+
+  return (
+    <div ref={containerRef} className="w-full">
+      <svg
+        ref={svgRef}
+        className="w-full border border-gray-200 rounded bg-white touch-none"
+        style={{
+          height: isMobile ? '400px' : '600px',
+          touchAction: 'none'
+        }}
+      ></svg>
+    </div>
+  );
+}
