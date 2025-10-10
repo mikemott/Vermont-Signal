@@ -1,0 +1,76 @@
+# Python cache and compiled files
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Data and cache directories
+vermont_news_analyzer/data/cache/*
+vermont_news_analyzer/data/input/*
+vermont_news_analyzer/data/output/*
+vermont_news_analyzer/logs/*
+logs/
+*.log
+
+# Test files
+test_*/
+test_*.py
+*_test.py
+
+# Environment and secrets
+.env
+.env.*
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation (not needed in container)
+*.md
+!README.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Deployment and migration files (not needed in API, but needed in worker)
+v1_*.json
+v1_*.sql
+export_*.py
+# migrate_*.py  # Commented out - needed for worker
+MIGRATION_STRATEGY.md
+DEPLOYMENT.md
+
+# Web frontend (not needed in backend containers)
+web/
+
+# Comparison and test directories
+test_comparison/
+
+# Fly.io
+fly.toml
+fly.*.toml
+
+# Backup files
+*.bak
+*.backup

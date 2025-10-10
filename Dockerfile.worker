@@ -1,0 +1,89 @@
+# ============================================================================
+# Stage 1: Builder - Install dependencies with build tools
+# ============================================================================
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+
+# Install Python dependencies to user directory
+RUN pip install --user --no-cache-dir -r requirements.txt
+
+# Install additional worker dependencies
+RUN pip install --user --no-cache-dir psycopg2-binary==2.9.10
+
+# Download full transformer model for Railway (no size limits!)
+# F1 score ~0.96, best accuracy
+RUN python -m spacy download en_core_web_trf
+
+
+# ============================================================================
+# Stage 2: Runtime - Minimal production image with ML tools
+# ============================================================================
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /app
+
+# Install only runtime dependencies (no build tools!)
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    cron \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Python packages from builder
+COPY --from=builder /root/.local /root/.local
+
+# Make sure scripts in .local are usable
+ENV PATH=/root/.local/bin:$PATH
+
+# Copy application files
+COPY vermont_news_analyzer/ vermont_news_analyzer/
+COPY migrate_v1_to_v2.py .
+
+# Create necessary directories
+RUN mkdir -p vermont_news_analyzer/data/cache vermont_news_analyzer/logs logs
+
+# Create cron job for batch processing
+# Run at 2am Eastern Time (7am UTC) - after V1 collector has run
+RUN echo '# Vermont Signal V2 Batch Processing' > /etc/cron.d/v2-batch && \
+    echo 'SHELL=/bin/bash' >> /etc/cron.d/v2-batch && \
+    echo 'PATH=/usr/local/bin:/usr/bin:/bin' >> /etc/cron.d/v2-batch && \
+    echo '# Run batch processor at 2am ET (7am UTC)' >> /etc/cron.d/v2-batch && \
+    echo '0 7 * * * root cd /app && env $(cat /app/.env | xargs) /usr/local/bin/python -m vermont_news_analyzer.batch_processor --limit 20 >> /app/logs/batch.log 2>&1' >> /etc/cron.d/v2-batch && \
+    echo '' >> /etc/cron.d/v2-batch
+
+RUN chmod 0644 /etc/cron.d/v2-batch
+RUN crontab /etc/cron.d/v2-batch
+RUN touch /var/log/cron.log /app/logs/batch.log
+
+# Create startup script
+RUN echo '#!/bin/bash\n\
+set -e\n\
+echo "Vermont Signal V2 Worker starting..."\n\
+\n\
+# Export environment variables to file for cron jobs\n\
+echo "Exporting environment variables for cron..."\n\
+printenv | grep -E "^(DATABASE_|ANTHROPIC_|GOOGLE_|OPENAI_|CLAUDE_|GEMINI_)" > /app/.env\n\
+\n\
+echo "Initializing database schema..."\n\
+python -c "from vermont_news_analyzer.modules.database import VermontSignalDatabase; db = VermontSignalDatabase(); db.connect(); db.init_schema(); db.disconnect()" 2>&1 | tee /app/logs/init.log\n\
+\n\
+echo "Worker initialized. Next batch run: 2am ET (7am UTC)"\n\
+echo "Starting cron for scheduled runs..."\n\
+cron\n\
+tail -f /var/log/cron.log /app/logs/*.log\n\
+' > /app/start.sh && chmod +x /app/start.sh
+
+CMD ["/app/start.sh"]
