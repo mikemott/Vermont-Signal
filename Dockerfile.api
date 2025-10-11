@@ -38,12 +38,7 @@ ENV PATH=/root/.local/bin:$PATH
 
 # Copy only necessary application files
 COPY api_server.py .
-COPY scripts/init_db_simple.py scripts/init_db_simple.py
-COPY vermont_news_analyzer/batch_processor.py vermont_news_analyzer/batch_processor.py
-COPY vermont_news_analyzer/config.py vermont_news_analyzer/config.py
-COPY vermont_news_analyzer/main.py vermont_news_analyzer/main.py
-COPY vermont_news_analyzer/__init__.py vermont_news_analyzer/__init__.py
-COPY vermont_news_analyzer/modules/ vermont_news_analyzer/modules/
+COPY vermont_news_analyzer/ vermont_news_analyzer/
 
 # Create necessary directories
 RUN mkdir -p vermont_news_analyzer/logs vermont_news_analyzer/data/cache
