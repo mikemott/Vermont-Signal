@@ -376,6 +376,25 @@ def initialize_database():
         raise HTTPException(status_code=500, detail=f"Failed to initialize database: {str(e)}")
 
 
+@app.post("/api/admin/import-article")
+def import_article(article: Dict):
+    """Import a single article (for V1 migration)"""
+    try:
+        article_id = db.store_article(article)
+        return {
+            'status': 'success',
+            'article_id': article_id
+        }
+    except Exception as e:
+        # Check if it's a duplicate
+        if 'duplicate' in str(e).lower() or 'unique' in str(e).lower():
+            return {
+                'status': 'skipped',
+                'reason': 'duplicate'
+            }
+        raise HTTPException(status_code=500, detail=f"Failed to import article: {str(e)}")
+
+
 @app.get("/api/admin/db-status")
 def database_status():
     """Check database schema status"""
