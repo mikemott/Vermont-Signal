@@ -23,6 +23,9 @@ RUN pip install --user --no-cache-dir -r requirements.txt
 # ============================================================================
 FROM python:3.11-slim
 
+# Cache bust - force rebuild (change this value to force cache invalidation)
+ARG CACHEBUST=20251011-v2
+
 WORKDIR /app
 
 # Install only runtime dependencies (no build tools!)
