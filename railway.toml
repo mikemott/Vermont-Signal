@@ -1,0 +1,10 @@
+# Railway Configuration
+# This file tells Railway how to build services
+# Each service can override these settings in their dashboard
+
+[build]
+builder = "dockerfile"
+
+[deploy]
+# Default settings - services can override in dashboard
+restartPolicyType = "on_failure"
