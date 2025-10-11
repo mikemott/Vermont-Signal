@@ -11,11 +11,11 @@ RUN apt-get update && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy minimal API requirements
-COPY requirements.api.txt .
+# Copy full requirements (needed for batch processing)
+COPY requirements.txt .
 
 # Install Python dependencies to user directory
-RUN pip install --user --no-cache-dir -r requirements.api.txt
+RUN pip install --user --no-cache-dir -r requirements.txt
 
 
 # ============================================================================
@@ -38,21 +38,23 @@ ENV PATH=/root/.local/bin:$PATH
 
 # Copy only necessary application files
 COPY api_server.py .
-COPY init_db_simple.py .
-COPY vermont_news_analyzer/modules/database.py vermont_news_analyzer/modules/database.py
+COPY scripts/init_db_simple.py scripts/init_db_simple.py
+COPY vermont_news_analyzer/batch_processor.py vermont_news_analyzer/batch_processor.py
+COPY vermont_news_analyzer/config.py vermont_news_analyzer/config.py
+COPY vermont_news_analyzer/main.py vermont_news_analyzer/main.py
+COPY vermont_news_analyzer/__init__.py vermont_news_analyzer/__init__.py
+COPY vermont_news_analyzer/modules/ vermont_news_analyzer/modules/
 
-# Create necessary directories and minimal __init__.py files
-RUN mkdir -p vermont_news_analyzer/modules vermont_news_analyzer/logs && \
-    echo '"""Vermont News Analyzer - API Server"""' > vermont_news_analyzer/__init__.py && \
-    echo '__version__ = "2.0.0"' >> vermont_news_analyzer/__init__.py && \
-    echo '"""Database module"""' > vermont_news_analyzer/modules/__init__.py
+# Create necessary directories
+RUN mkdir -p vermont_news_analyzer/logs vermont_news_analyzer/data/cache
 
-# Expose port
-EXPOSE 8000
+# Railway provides PORT env var - use it
+ENV PORT=8000
+EXPOSE $PORT
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl --fail http://localhost:8000/api/health || exit 1
+    CMD curl --fail http://localhost:${PORT}/api/health || exit 1
 
-# Run FastAPI server
-CMD ["uvicorn", "api_server:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run FastAPI server (Railway will set PORT dynamically)
+CMD uvicorn api_server:app --host 0.0.0.0 --port ${PORT}

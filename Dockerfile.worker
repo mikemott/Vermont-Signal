@@ -50,7 +50,6 @@ ENV PATH=/root/.local/bin:$PATH
 
 # Copy application files
 COPY vermont_news_analyzer/ vermont_news_analyzer/
-COPY migrate_v1_to_v2.py .
 
 # Create necessary directories
 RUN mkdir -p vermont_news_analyzer/data/cache vermont_news_analyzer/logs logs

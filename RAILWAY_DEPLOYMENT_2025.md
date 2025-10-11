@@ -1,4 +1,4 @@
-# Railway Deployment Guide (2025) - Vermont Signal V2
+# Railway Deployment Guide (2025) - Vermont Signal
 
 **Updated:** October 2025
 **Status:** Modern Railway CLI and dashboard workflow
@@ -23,7 +23,7 @@ The old Railway documentation was outdated. Here's what's changed in 2025:
 ## Current Architecture on Railway
 
 ```
-Vermont Signal V2 (Railway Project)
+Vermont Signal (Railway Project)
 ├── PostgreSQL Database (managed)
 │   └── Automatically provides DATABASE_URL
 │
@@ -31,9 +31,9 @@ Vermont Signal V2 (Railway Project)
 │   ├── Dockerfile: Dockerfile.api
 │   ├── Config: railway.toml
 │   ├── Port: 8000
-│   └── Public URL: api-production-9b77.up.railway.app
+│   └── Public URL: TBD
 │
-└── Worker Service (to be deployed)
+└── Worker Service
     ├── Dockerfile: Dockerfile.worker
     ├── Config: railway.worker.toml
     └── Purpose: Batch processing with cron
@@ -68,7 +68,7 @@ brew install railway
 railway login
 
 # Navigate to project
-cd "/Users/mike/Library/Mobile Documents/com~apple~CloudDocs/Projects/News-Extraction-Pipeline"
+cd "/Users/mike/Library/Mobile Documents/com~apple~CloudDocs/Projects/Vermont-Signal"
 ```
 
 ### 2. Link to Existing Project
@@ -351,7 +351,7 @@ For Railway-specific issues:
 - Railway Docs: https://docs.railway.com
 - Railway Discord: https://discord.gg/railway
 
-For Vermont Signal V2 issues:
+For Vermont Signal issues:
 - Check logs: `railway logs`
 - Verify database: `/api/admin/db-status`
 - Test endpoints: `/api/health`, `/api/stats`

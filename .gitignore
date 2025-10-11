@@ -62,3 +62,14 @@ web/out/
 web/node_modules/
 web/.turbo/
 web/dist/
+
+# Archived documentation
+docs/archive/
+
+# Temporary migration/analysis files
+*.sql
+migration_analysis.log
+*_export.json
+
+# Test outputs
+test_comparison/

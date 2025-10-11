@@ -29,20 +29,69 @@ class ArticleFilter:
 
     # Filter patterns for low-value content
     EXCLUDE_TITLE_PATTERNS = [
+        # Obituaries
         r'(?i)^obituar(y|ies):',
+        r'(?i)\bobituar(y|ies)\b',
+        r'(?i)in memoriam',
+
+        # School/Education listings
         r'(?i)^school notes?:',
+        r'(?i)^dean\'?s list',
+        r'(?i)^honor roll',
+        r'(?i)^academic (honors?|achievements?)',
+
+        # Events and Calendar
         r'(?i)^calendar:',
         r'(?i)^events?:',
         r'(?i)^listings?:',
         r'(?i)^week(ly|end) roundup',
         r'(?i)^community calendar',
+        r'(?i)^upcoming events?',
+        r'(?i)^what\'?s (on|happening)',
+        r'(?i)^things to do',
+
+        # Legal/Public Notices
         r'(?i)^public notices?',
         r'(?i)^legal notices?',
+        r'(?i)^court notices?',
+
+        # Routine Reports
         r'(?i)construction report for the week',
         r'(?i)road (construction|work) (report|update)',
+        r'(?i)^police (log|report|blotter)',
+        r'(?i)^fire (log|report)',
+
+        # Briefs and Digests
         r'(?i)^briefs?:',
         r'(?i)^digest:',
         r'(?i)^quick hits',
+        r'(?i)^in brief',
+        r'(?i)^news (briefs?|digest)',
+
+        # Opinion and Commentary
+        r'(?i)^opinion:',
+        r'(?i)^commentary:',
+        r'(?i)^editorial:',
+        r'(?i)^letter to',
+        r'(?i)^letters to',
+        r'(?i)^guest essay',
+        r'(?i)^guest opinion',
+        r'(?i)^viewpoint:',
+        r'(?i)^my turn:',
+        r'(?i)^reader (opinion|commentary)',
+        r'(?i)^op-ed:',
+
+        # Reviews
+        r'(?i)^review:',
+        r'(?i)\b(book|movie|film|theater|restaurant|album|music|art) review\b',
+        r'(?i)^restaurant review',
+        r'(?i)^critic\'?s pick',
+
+        # Sponsored/Promotional
+        r'(?i)^sponsored',
+        r'(?i)^advertorial',
+        r'(?i)^paid post',
+        r'(?i)^partner content',
     ]
 
     # Tags that indicate low-value content
@@ -57,6 +106,24 @@ class ArticleFilter:
         'digest',
         'public_notice',
         'legal_notice',
+        'opinion',
+        'editorial',
+        'commentary',
+        'letter_to_editor',
+        'letters',
+        'review',
+        'reviews',
+        'book_review',
+        'restaurant_review',
+        'movie_review',
+        'music_review',
+        'sponsored',
+        'advertorial',
+        'promotional',
+        'school_notes',
+        'honor_roll',
+        'police_log',
+        'fire_log',
     }
 
     # Tags that indicate high-value content (boost score)
@@ -462,6 +529,13 @@ def main():
     )
 
     parser.add_argument(
+        '--v1-port',
+        type=int,
+        default=5432,
+        help='V1 database port'
+    )
+
+    parser.add_argument(
         '--v1-database',
         default='vermont_signal',
         help='V1 database name'
@@ -484,6 +558,7 @@ def main():
     # V1 database config
     v1_config = {
         'host': args.v1_host,
+        'port': args.v1_port,
         'database': args.v1_database,
         'user': args.v1_user,
         'password': args.v1_password

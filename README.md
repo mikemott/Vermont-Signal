@@ -1,4 +1,4 @@
-# Vermont News Analyzer Pipeline
+# Vermont Signal
 
 A production-grade, multi-tiered fact extraction pipeline for Vermont local news analysis. Combines ensemble LLM extraction (Claude, Gemini, GPT-4o-mini) with specialized NLP tools (spaCy, BERTopic) for maximum accuracy and auditability.
 
@@ -59,7 +59,8 @@ A production-grade, multi-tiered fact extraction pipeline for Vermont local news
 
 1. **Clone the repository**
 ```bash
-cd /path/to/News-Extraction-Pipeline
+git clone https://github.com/mikemott/Vermont-Signal.git
+cd Vermont-Signal
 ```
 
 2. **Create virtual environment**
@@ -98,7 +99,7 @@ OPENAI_API_KEY=your_openai_api_key_here
 
 **From text:**
 ```bash
-python vermont_news_analyzer/main.py \
+python main.py \
   --mode single \
   --text "Vermont lawmakers passed a new climate bill..." \
   --id "vt_climate_2024"
@@ -106,14 +107,14 @@ python vermont_news_analyzer/main.py \
 
 **From file:**
 ```bash
-python vermont_news_analyzer/main.py \
+python main.py \
   --mode single \
-  --file vermont_news_analyzer/data/input/article1.txt
+  --file data/input/article1.txt
 ```
 
 **From URL:**
 ```bash
-python vermont_news_analyzer/main.py \
+python main.py \
   --mode single \
   --url "https://vtdigger.org/2024/..."
 ```
@@ -123,9 +124,9 @@ python vermont_news_analyzer/main.py \
 Process all articles in a directory:
 
 ```bash
-python vermont_news_analyzer/main.py \
+python main.py \
   --mode batch \
-  --input-dir vermont_news_analyzer/data/input \
+  --input-dir data/input \
   --pattern "*.txt"
 ```
 
@@ -410,7 +411,7 @@ mypy vermont_news_analyzer/
 ## Project Structure
 
 ```
-News-Extraction-Pipeline/
+Vermont-Signal/
 ├── vermont_news_analyzer/
 │   ├── modules/
 │   │   ├── ingestion.py       # Tier 1: Text cleaning & chunking
