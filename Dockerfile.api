@@ -38,6 +38,7 @@ ENV PATH=/root/.local/bin:$PATH
 
 # Copy only necessary application files
 COPY api_server.py .
+COPY init_db_simple.py .
 COPY vermont_news_analyzer/modules/database.py vermont_news_analyzer/modules/database.py
 
 # Create necessary directories and minimal __init__.py files

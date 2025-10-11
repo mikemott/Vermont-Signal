@@ -360,8 +360,47 @@ def get_sources():
 
 
 # ============================================================================
-# HEALTH CHECK
+# ADMIN & HEALTH CHECK
 # ============================================================================
+
+@app.post("/api/admin/init-db")
+def initialize_database():
+    """Initialize database schema (idempotent - safe to run multiple times)"""
+    try:
+        db.init_schema()
+        return {
+            'status': 'success',
+            'message': 'Database schema initialized successfully'
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to initialize database: {str(e)}")
+
+
+@app.get("/api/admin/db-status")
+def database_status():
+    """Check database schema status"""
+    with db.conn.cursor() as cur:
+        cur.execute("""
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+            ORDER BY table_name
+        """)
+        tables = [row[0] for row in cur.fetchall()]
+
+        expected_tables = [
+            'articles', 'extraction_results', 'facts',
+            'entity_relationships', 'api_costs',
+            'corpus_topics', 'article_topics'
+        ]
+
+        return {
+            'tables_found': tables,
+            'expected_tables': expected_tables,
+            'all_tables_exist': all(t in tables for t in expected_tables),
+            'missing_tables': [t for t in expected_tables if t not in tables]
+        }
+
 
 @app.get("/api/health")
 def health_check():

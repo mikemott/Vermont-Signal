@@ -1,0 +1,12 @@
+# Railway Configuration for Vermont Signal V2 Worker
+# Batch processing service with full ML stack
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile.worker"
+
+[deploy]
+# Worker runs as a cron job via the Docker entrypoint
+# No external port needed
+numReplicas = 1
+restartPolicyType = "always"
