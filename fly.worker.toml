@@ -1,0 +1,16 @@
+# Vermont Signal V2 - Batch Processing Worker
+app = "vermont-signal-v2-worker"
+primary_region = "ewr"
+
+[build]
+  dockerfile = "Dockerfile.worker"
+
+[env]
+  TZ = "America/New_York"
+  SPACY_MODEL = "en_core_web_trf"  # Full transformer model
+
+# No HTTP service - this is a background worker
+[[vm]]
+  memory = '1gb'  # More memory for LLM processing
+  cpu_kind = 'shared'
+  cpus = 1

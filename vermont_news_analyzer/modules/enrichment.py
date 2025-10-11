@@ -14,6 +14,7 @@ import sys
 
 sys.path.append(str(Path(__file__).parent.parent))
 from config import WikidataConfig, PipelineConfig
+from modules.wikidata_cache import WikidataCache, RateLimitedWikidataClient
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +53,18 @@ class WikidataEnricher:
         self.timeout = WikidataConfig.WIKIDATA_TIMEOUT
         self.enabled = WikidataConfig.ENABLE_WIKIDATA_ENRICHMENT
 
+        # Initialize cache and rate-limited client
+        self.cache = WikidataCache()
+        self.client = RateLimitedWikidataClient(
+            endpoint=self.endpoint,
+            requests_per_minute=50
+        )
+
+        logger.info("WikidataEnricher initialized with caching and rate limiting")
+
     def search_entity(self, entity_name: str, entity_type: str = None) -> WikidataEntity:
         """
-        Search for entity in Wikidata
+        Search for entity in Wikidata with caching
 
         Args:
             entity_name: Name of entity to search
@@ -68,45 +78,43 @@ class WikidataEnricher:
             logger.info("Wikidata enrichment disabled")
             return WikidataEntity(entity_name=entity_name, found=False)
 
-        logger.info(f"Searching Wikidata for: {entity_name}")
+        logger.debug(f"Searching Wikidata for: {entity_name}")
 
         try:
-            # Search for entity
-            search_params = {
-                'action': 'wbsearchentities',
-                'format': 'json',
-                'language': 'en',
-                'search': entity_name,
-                'limit': 1
-            }
+            # Check cache first
+            cached = self.cache.get(entity_name)
+            if cached:
+                logger.debug(f"Cache hit for: {entity_name}")
+                return WikidataEntity(
+                    entity_name=entity_name,
+                    wikidata_id=cached['wikidata_id'],
+                    description=cached['description'],
+                    properties=cached['properties'],
+                    found=True
+                )
 
-            response = requests.get(
-                self.endpoint,
-                params=search_params,
-                timeout=self.timeout
-            )
-            response.raise_for_status()
-            data = response.json()
+            # Search using rate-limited client
+            search_result = self.client.search_entity(entity_name)
 
-            if not data.get('search'):
-                logger.info(f"No Wikidata results for: {entity_name}")
+            if not search_result:
+                logger.debug(f"No Wikidata results for: {entity_name}")
                 return WikidataEntity(entity_name=entity_name, found=False)
 
-            # Get first result
-            result = data['search'][0]
-            wikidata_id = result.get('id')
-            description = result.get('description', '')
+            wikidata_id = search_result.get('id')
+            description = search_result.get('description', '')
 
-            # Get detailed entity data
-            entity_data = self._get_entity_details(wikidata_id)
+            # Get detailed properties
+            properties = self.client.get_entity_details(wikidata_id)
+
+            # Cache the result
+            self.cache.set(entity_name, wikidata_id, description, properties)
 
             return WikidataEntity(
                 entity_name=entity_name,
                 wikidata_id=wikidata_id,
                 description=description,
-                properties=entity_data.get('properties', {}),
-                aliases=result.get('aliases', []),
-                coordinates=entity_data.get('coordinates'),
+                properties=properties,
+                aliases=search_result.get('aliases', []),
                 found=True
             )
 

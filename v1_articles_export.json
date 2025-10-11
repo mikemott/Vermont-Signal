@@ -1,0 +1,9 @@
+No machine specified, using e82929dc223368 in region ewr
+Connecting to fdaa:2e:c210:a7b:4d9:68bf:518c:2...
+cat: '>': No such file or directory
+cat: /tmp/export.py: No such file or directory
+cat: '&&': No such file or directory
+cat: python3: No such file or directory
+cat: /tmp/export.py: No such file or directory
+Warning: Metrics token unavailable: failed to run query($slug: String!) { organization(slug: $slug) { id internalNumericId slug rawSlug name type billable limitedAccessTokens { nodes { id name expiresAt revokedAt user { email } } } } }: context canceled
+Error: ssh shell: Process exited with status 1

@@ -66,7 +66,13 @@ pandas>=2.2.0                 # Data manipulation (used by BERTopic)
 # mypy>=1.8.0                 # Type checking
 
 # ============================================================================
+# Database & API (V2 Backend)
+# ============================================================================
+psycopg2-binary>=2.9.10       # PostgreSQL driver
+fastapi>=0.115.0              # REST API framework
+uvicorn[standard]>=0.32.0     # ASGI server for FastAPI
+
+# ============================================================================
 # Deployment (fly.io)
 # ============================================================================
-# gunicorn>=22.0.0            # WSGI server (if adding web interface)
-# uvicorn>=0.30.0             # ASGI server (if using FastAPI)
+# gunicorn>=22.0.0            # WSGI server (alternative to uvicorn)
