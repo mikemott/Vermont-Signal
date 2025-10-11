@@ -80,7 +80,10 @@ printenv | grep -E "^(DATABASE_|ANTHROPIC_|GOOGLE_|OPENAI_|CLAUDE_|GEMINI_)" > /
 echo "Initializing database schema..."\n\
 python -c "from vermont_news_analyzer.modules.database import VermontSignalDatabase; db = VermontSignalDatabase(); db.connect(); db.init_schema(); db.disconnect()" 2>&1 | tee /app/logs/init.log\n\
 \n\
-echo "Worker initialized. Next batch run: 2am ET (7am UTC)"\n\
+echo "Running initial batch processing (20 articles)..."\n\
+python -m vermont_news_analyzer.batch_processor --limit 20 2>&1 | tee /app/logs/startup-batch.log\n\
+\n\
+echo "Worker initialized. Next scheduled run: 2am ET (7am UTC)"\n\
 echo "Starting cron for scheduled runs..."\n\
 cron\n\
 tail -f /var/log/cron.log /app/logs/*.log\n\
