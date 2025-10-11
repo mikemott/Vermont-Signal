@@ -421,6 +421,29 @@ def database_status():
         }
 
 
+@app.post("/api/admin/process-batch")
+def process_batch(limit: int = Query(20, le=100)):
+    """
+    Process a batch of pending articles through the extraction pipeline
+
+    Args:
+        limit: Number of articles to process (max 100)
+    """
+    try:
+        from vermont_news_analyzer.batch_processor import BatchProcessor
+
+        processor = BatchProcessor(max_articles_per_run=limit)
+        stats = processor.process_batch(limit=limit, skip_cost_check=False)
+        processor.close()
+
+        return {
+            'status': 'success',
+            'stats': stats
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Batch processing failed: {str(e)}")
+
+
 @app.get("/api/health")
 def health_check():
     """Health check endpoint"""
