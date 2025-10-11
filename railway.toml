@@ -1,9 +1,0 @@
-# Railway Configuration for Worker Service
-# API service should override this in dashboard settings
-
-[build]
-builder = "dockerfile"
-dockerfilePath = "Dockerfile.worker"
-
-[deploy]
-restartPolicyType = "on_failure"
