@@ -24,7 +24,7 @@ RUN pip install --user --no-cache-dir -r requirements.txt
 FROM python:3.11-slim
 
 # Cache bust - force rebuild (change this value to force cache invalidation)
-ARG CACHEBUST=20251011-v2
+ARG CACHEBUST=20251011-v3
 
 WORKDIR /app
 
@@ -55,4 +55,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl --fail http://localhost:${PORT}/api/health || exit 1
 
 # Run FastAPI server (Railway will set PORT dynamically)
-CMD uvicorn api_server:app --host 0.0.0.0 --port ${PORT}
+# Use shell form to allow environment variable expansion
+CMD uvicorn api_server:app --host 0.0.0.0 --port $PORT
