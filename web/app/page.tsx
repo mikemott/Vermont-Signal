@@ -46,7 +46,7 @@ const sampleConnections = [
   { source: 'bernie-sanders', target: 'peter-welch', label: 'colleagues' },
 ];
 
-const entityColors = {
+const entityColors: Record<string, string> = {
   PERSON: '#0f1c3f',         // Navy
   LOCATION: '#d4a574',       // Gold
   ORG: '#5a8c69',            // Forest Green
