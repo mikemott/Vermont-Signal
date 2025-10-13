@@ -1,15 +1,47 @@
 'use client';
 
 import { X, ExternalLink } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { Article } from '../data/sampleArticles';
+import EntityNetworkD3 from './EntityNetworkD3';
+import * as api from '../lib/api';
 
 interface ArticleDetailsPanelProps {
   article: Article | null;
   onClose: () => void;
   entityColors: Record<string, string>;
+  onEntityClick?: (entityName: string) => void;
 }
 
-export default function ArticleDetailsPanel({ article, onClose, entityColors }: ArticleDetailsPanelProps) {
+export default function ArticleDetailsPanel({ article, onClose, entityColors, onEntityClick }: ArticleDetailsPanelProps) {
+  const [networkData, setNetworkData] = useState<api.EntityNetwork | null>(null);
+  const [networkLoading, setNetworkLoading] = useState(false);
+  const [networkError, setNetworkError] = useState<string | null>(null);
+
+  // Fetch entity network when article changes
+  useEffect(() => {
+    if (!article) {
+      setNetworkData(null);
+      return;
+    }
+
+    const fetchNetwork = async () => {
+      try {
+        setNetworkLoading(true);
+        const data = await api.getArticleEntityNetwork(article.id);
+        setNetworkData(data);
+        setNetworkError(null);
+      } catch (err) {
+        console.error('Failed to fetch article entity network:', err);
+        setNetworkError('Failed to load entity network');
+      } finally {
+        setNetworkLoading(false);
+      }
+    };
+
+    fetchNetwork();
+  }, [article?.id]);
+
   if (!article) return null;
 
   // Group entities by type
@@ -109,6 +141,47 @@ export default function ArticleDetailsPanel({ article, onClose, entityColors }: 
                 {article.consensus_summary}
               </p>
             </div>
+          </section>
+
+          {/* Entity Network Visualization */}
+          <section>
+            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+              🔗 Entity Network
+            </h3>
+            {networkLoading ? (
+              <div className="bg-gray-50 rounded-lg p-8 text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#0f1c3f] mx-auto"></div>
+                <p className="text-gray-600 text-sm mt-3">Loading network...</p>
+              </div>
+            ) : networkError ? (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-800">
+                {networkError}
+              </div>
+            ) : networkData ? (
+              <div className="space-y-3">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs">
+                  <strong>Interactive:</strong> This network shows all {networkData.total_entities} entities from this article.
+                  Click any node to explore its broader connections across all articles.
+                </div>
+                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                  <EntityNetworkD3
+                    entities={networkData.nodes.map(n => ({ id: n.id, label: n.label, type: n.type }))}
+                    connections={networkData.connections.map(c => ({
+                      source: c.source,
+                      target: c.target,
+                      label: c.label || c.relationship_type || 'related'
+                    }))}
+                    entityColors={entityColors}
+                    width={600}
+                    height={400}
+                    onEntityClick={onEntityClick}
+                  />
+                </div>
+                <div className="text-xs text-gray-500 text-center">
+                  {networkData.total_entities} entities • {networkData.total_relationships} connections
+                </div>
+              </div>
+            ) : null}
           </section>
 
           {/* AI Analysis Stats */}

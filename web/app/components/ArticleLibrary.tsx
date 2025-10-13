@@ -1,16 +1,59 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Search } from 'lucide-react';
-import { Article, sampleArticles } from '../data/sampleArticles';
+import { Article as LegacyArticle } from '../data/sampleArticles';
+import * as api from '../lib/api';
 import ArticleCard from './ArticleCard';
+
+// Adapter type that includes both API fields and display-friendly fields
+type DisplayArticle = {
+  // Core API fields
+  id: number;
+  title: string;
+  url: string;
+  source: string;
+  published_date: string;
+  summary: string | null;
+  processed_date: string | null;
+  fact_count: number;
+  high_confidence_count: number;
+  wikidata_enriched_count: number;
+  spacy_f1_score: number | null;
+
+  // Display-friendly fields
+  article_id: string;
+  date: string;
+  consensus_summary: string;
+  extracted_facts: Array<{
+    entity: string;
+    type: 'PERSON' | 'LOCATION' | 'ORG' | 'EVENT';
+    confidence: number;
+    event_description?: string;
+    sources: string[];
+  }>;
+  metadata: {
+    processing_timestamp: string;
+    total_facts: number;
+    high_confidence_facts: number;
+    overall_confidence: number;
+    conflict_report: {
+      has_conflicts: boolean;
+      summary_similarity: number;
+    };
+  };
+  read_time: number;
+};
 
 interface ArticleLibraryProps {
   entityColors: Record<string, string>;
-  onArticleClick?: (article: Article) => void;
+  onArticleClick?: (article: LegacyArticle) => void;
 }
 
 export default function ArticleLibrary({ entityColors, onArticleClick }: ArticleLibraryProps) {
+  const [articles, setArticles] = useState<DisplayArticle[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSource, setSelectedSource] = useState<string>('all');
   const [selectedEntity, setSelectedEntity] = useState<string | null>(null);
@@ -19,15 +62,80 @@ export default function ArticleLibrary({ entityColors, onArticleClick }: Article
   const [currentPage, setCurrentPage] = useState(1);
   const articlesPerPage = 9;
 
+  // Fetch articles from API
+  useEffect(() => {
+    async function fetchArticles() {
+      try {
+        console.log('[ArticleLibrary] Fetching articles...');
+        const data = await api.getArticles({ limit: 100 });
+        console.log('[ArticleLibrary] Received data:', { count: data.articles?.length, hasArticles: !!data.articles });
+
+        // Transform API articles to display format
+        const transformed: DisplayArticle[] = data.articles.map(article => ({
+          // Core API fields
+          id: article.id,
+          title: article.title,
+          url: article.url,
+          source: article.source,
+          published_date: article.published_date,
+          summary: article.summary,
+          processed_date: article.processed_date,
+          fact_count: article.fact_count,
+          high_confidence_count: article.high_confidence_count,
+          wikidata_enriched_count: article.wikidata_enriched_count,
+          spacy_f1_score: article.spacy_f1_score,
+
+          // Display-friendly fields
+          article_id: article.id.toString(),
+          date: article.published_date,
+          consensus_summary: article.consensus_summary || article.summary || 'No summary available',
+
+          // Transform facts for display
+          extracted_facts: article.extracted_facts.map(fact => ({
+            entity: fact.entity,
+            type: fact.entity_type as 'PERSON' | 'LOCATION' | 'ORG' | 'EVENT',
+            confidence: fact.confidence,
+            event_description: fact.event_description || '',
+            sources: ['claude', 'gemini', 'gpt'] // Mock sources for now
+          })),
+
+          // Metadata
+          metadata: {
+            processing_timestamp: article.processed_date || new Date().toISOString(),
+            total_facts: article.fact_count,
+            high_confidence_facts: article.high_confidence_count,
+            overall_confidence: article.spacy_f1_score || 0.85,
+            conflict_report: {
+              has_conflicts: false,
+              summary_similarity: 0.85
+            }
+          },
+
+          read_time: Math.ceil((article.summary?.split(' ').length || 200) / 200) // Estimate read time
+        }));
+
+        setArticles(transformed);
+        setLoading(false);
+      } catch (err) {
+        console.error('Error fetching articles:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load articles');
+        setArticles([]);
+        setLoading(false);
+      }
+    }
+
+    fetchArticles();
+  }, []);
+
   // Get unique sources
   const sources = useMemo(() => {
-    const uniqueSources = new Set(sampleArticles.map(a => a.source));
+    const uniqueSources = new Set(articles.map(a => a.source));
     return ['all', ...Array.from(uniqueSources)];
-  }, []);
+  }, [articles]);
 
   // Filter and sort articles
   const filteredArticles = useMemo(() => {
-    let filtered = sampleArticles;
+    let filtered = articles;
 
     // Search filter
     if (searchQuery) {
@@ -76,7 +184,7 @@ export default function ArticleLibrary({ entityColors, onArticleClick }: Article
   const popularEntities = useMemo(() => {
     const entityCounts = new Map<string, { count: number; type: string }>();
 
-    sampleArticles.forEach(article => {
+    articles.forEach(article => {
       article.extracted_facts.forEach(fact => {
         const current = entityCounts.get(fact.entity) || { count: 0, type: fact.type };
         entityCounts.set(fact.entity, { count: current.count + 1, type: fact.type });
@@ -87,7 +195,7 @@ export default function ArticleLibrary({ entityColors, onArticleClick }: Article
       .sort((a, b) => b[1].count - a[1].count)
       .slice(0, 8)
       .map(([entity, data]) => ({ entity, ...data }));
-  }, []);
+  }, [articles]);
 
   const handleEntityClick = (entity: string, type: string) => {
     if (selectedEntity === entity) {
@@ -101,11 +209,43 @@ export default function ArticleLibrary({ entityColors, onArticleClick }: Article
     }
   };
 
-  const handleArticleClick = (article: Article) => {
+  const handleArticleClick = (article: DisplayArticle) => {
     if (onArticleClick) {
-      onArticleClick(article);
+      // Cast to LegacyArticle for backward compatibility with existing components
+      onArticleClick(article as unknown as LegacyArticle);
     }
   };
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-3xl font-bold text-[#0f1c3f]">Article Library</h2>
+          <p className="text-gray-600 mt-2">Loading articles...</p>
+        </div>
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0f1c3f]"></div>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-3xl font-bold text-[#0f1c3f]">Article Library</h2>
+        </div>
+        <div className="text-center py-16 bg-red-50 rounded-lg border-2 border-red-200">
+          <div className="text-4xl mb-4">⚠️</div>
+          <h3 className="text-xl font-semibold text-red-800 mb-2">Error loading articles</h3>
+          <p className="text-red-600">{error}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
