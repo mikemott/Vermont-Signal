@@ -67,7 +67,8 @@ export default function ArticleLibrary({ entityColors, onArticleClick }: Article
     async function fetchArticles() {
       try {
         console.log('[ArticleLibrary] Fetching articles...');
-        const data = await api.getArticles({ limit: 100 });
+        // Fetch all articles without time restrictions
+        const data = await api.getArticles({ limit: 100, days: 36500 }); // ~100 years
         console.log('[ArticleLibrary] Received data:', { count: data.articles?.length, hasArticles: !!data.articles });
 
         // Transform API articles to display format
