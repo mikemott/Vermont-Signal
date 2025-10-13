@@ -28,7 +28,8 @@ export default function ArticleDetailsPanel({ article, onClose, entityColors, on
     const fetchNetwork = async () => {
       try {
         setNetworkLoading(true);
-        const data = await api.getArticleEntityNetwork(article.id);
+        const articleId = typeof article.article_id === 'string' ? parseInt(article.article_id) : article.article_id;
+        const data = await api.getArticleEntityNetwork(articleId);
         setNetworkData(data);
         setNetworkError(null);
       } catch (err) {
@@ -40,7 +41,7 @@ export default function ArticleDetailsPanel({ article, onClose, entityColors, on
     };
 
     fetchNetwork();
-  }, [article?.id]);
+  }, [article?.article_id]);
 
   if (!article) return null;
 
