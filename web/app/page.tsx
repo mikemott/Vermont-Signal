@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { SignalIcon } from './components/SignalIcon';
 import EntityNetworkD3 from './components/EntityNetworkD3';
 import EntityDetailsPanel, { EntityData } from './components/EntityDetailsPanel';
