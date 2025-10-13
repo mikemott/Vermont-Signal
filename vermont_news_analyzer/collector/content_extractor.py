@@ -52,7 +52,7 @@ class ContentExtractor:
             return None
 
         try:
-            article = Article(url)
+            article = Article(url, request_timeout=self.timeout)
             article.download()
             article.parse()
 
@@ -85,7 +85,7 @@ class ContentExtractor:
             return None
 
         try:
-            article = Article(url)
+            article = Article(url, request_timeout=self.timeout)
             article.download()
             article.parse()
 

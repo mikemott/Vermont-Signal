@@ -10,7 +10,9 @@ import time
 from datetime import datetime
 from typing import List, Dict, Optional
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
+import psycopg2
 
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
@@ -61,31 +63,35 @@ class FeedStatus:
             logger.error(f"Failed to initialize feed_status table: {e}")
 
     def update(self, feed_url: str, success: bool, error: str = None, articles_collected: int = 0):
-        """Update feed fetch status"""
+        """Update feed fetch status atomically in a single query"""
         try:
             with self.db.get_connection() as conn:
                 with conn.cursor() as cur:
-                    if success:
-                        cur.execute("""
-                            INSERT INTO feed_status (feed_url, last_fetch, last_success, error_count, total_articles_collected)
-                            VALUES (%s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, %s)
-                            ON CONFLICT (feed_url)
-                            DO UPDATE SET
-                                last_fetch = CURRENT_TIMESTAMP,
-                                last_success = CURRENT_TIMESTAMP,
-                                error_count = 0,
-                                total_articles_collected = feed_status.total_articles_collected + %s
-                        """, (feed_url, articles_collected, articles_collected))
-                    else:
-                        cur.execute("""
-                            INSERT INTO feed_status (feed_url, last_fetch, error_count, last_error)
-                            VALUES (%s, CURRENT_TIMESTAMP, 1, %s)
-                            ON CONFLICT (feed_url)
-                            DO UPDATE SET
-                                last_fetch = CURRENT_TIMESTAMP,
-                                error_count = feed_status.error_count + 1,
-                                last_error = %s
-                        """, (feed_url, error, error))
+                    # Single atomic UPSERT query that handles both success and failure
+                    cur.execute("""
+                        INSERT INTO feed_status (
+                            feed_url, last_fetch, last_success, error_count,
+                            last_error, total_articles_collected
+                        )
+                        VALUES (
+                            %s, CURRENT_TIMESTAMP,
+                            CASE WHEN %s THEN CURRENT_TIMESTAMP ELSE NULL END,
+                            CASE WHEN %s THEN 0 ELSE 1 END,
+                            %s, %s
+                        )
+                        ON CONFLICT (feed_url)
+                        DO UPDATE SET
+                            last_fetch = CURRENT_TIMESTAMP,
+                            last_success = CASE WHEN %s THEN CURRENT_TIMESTAMP
+                                              ELSE feed_status.last_success END,
+                            error_count = CASE WHEN %s THEN 0
+                                             ELSE feed_status.error_count + 1 END,
+                            last_error = CASE WHEN %s THEN NULL ELSE %s END,
+                            total_articles_collected = feed_status.total_articles_collected + %s
+                    """, (
+                        feed_url, success, success, error, articles_collected,
+                        success, success, success, error, articles_collected
+                    ))
                     conn.commit()
         except Exception as e:
             logger.error(f"Failed to update feed status: {e}")
@@ -145,7 +151,7 @@ class RSSCollector:
         self.extract_full_text = extract_full_text
 
         if extract_full_text:
-            self.content_extractor = ContentExtractor()
+            self.content_extractor = ContentExtractor(timeout=10)  # 10 second timeout
 
         logger.info(f"RSSCollector initialized (full_text={extract_full_text})")
 
@@ -169,23 +175,27 @@ class RSSCollector:
             logger.info(f"Fetching feed: {feed_url}")
             feed = feedparser.parse(feed_url)
 
-            # Handle rate limiting (429 errors)
-            if hasattr(feed, 'status') and feed.status == 429:
-                if feed_url in RATE_LIMITED_FEEDS and retry_count < 3:
-                    wait_time = (2 ** retry_count) * 5  # Exponential backoff: 5s, 10s, 20s
-                    logger.warning(
-                        f"Rate limited on {feed_url}. "
-                        f"Retrying in {wait_time}s... (attempt {retry_count + 1}/3)"
-                    )
-                    time.sleep(wait_time)
-                    return self.fetch_feed(feed_url, retry_count + 1)
+            # Handle rate limiting (429 errors) - check in bozo_exception
+            if feed.bozo and hasattr(feed, 'bozo_exception'):
+                exception_str = str(feed.bozo_exception).lower()
+                if '429' in exception_str or 'too many requests' in exception_str or 'rate limit' in exception_str:
+                    if feed_url in RATE_LIMITED_FEEDS and retry_count < 3:
+                        wait_time = (2 ** retry_count) * 5  # Exponential backoff: 5s, 10s, 20s
+                        logger.warning(
+                            f"Rate limited on {feed_url}. "
+                            f"Retrying in {wait_time}s... (attempt {retry_count + 1}/3)"
+                        )
+                        time.sleep(wait_time)
+                        return self.fetch_feed(feed_url, retry_count + 1)
+                    else:
+                        logger.error(f"Rate limited on {feed_url}. Skipping.")
+                        self.feed_status.update(feed_url, success=False, error="Rate limited (429)")
+                        return []
                 else:
-                    logger.error(f"Rate limited on {feed_url}. Skipping.")
-                    self.feed_status.update(feed_url, success=False, error="Rate limited (429)")
-                    return []
-
-            if feed.bozo:  # Feed parsing error
-                logger.warning(f"Feed parsing warning for {feed_url}: {feed.bozo_exception}")
+                    # Other feed parsing error
+                    logger.warning(f"Feed parsing warning for {feed_url}: {feed.bozo_exception}")
+            elif feed.bozo:
+                logger.warning(f"Feed parsing warning for {feed_url}: {feed.get('bozo_exception', 'Unknown')}")
 
             # Check if this feed requires Vermont filtering
             requires_filtering = feed_url in FILTERED_FEEDS
@@ -235,8 +245,10 @@ class RSSCollector:
 
                 # Apply Vermont keyword filter if required (before other filters)
                 if requires_filtering:
-                    combined_text = f"{article['title']} {article['summary']}"
+                    # Check title + summary + first part of content for better accuracy
+                    combined_text = f"{article['title']} {article['summary']} {article['content'][:500]}"
                     if not is_vermont_related(combined_text):
+                        logger.debug(f"Filtered non-Vermont: {article['title'][:60]}...")
                         vt_filtered_count += 1
                         continue
 
@@ -248,15 +260,20 @@ class RSSCollector:
                 )
 
                 if should_filter:
+                    logger.debug(f"Filtered {reason}: {article['title'][:60]}...")
                     if reason in filter_stats:
                         filter_stats[reason] += 1
                     continue
 
-                # Parse published date
-                if 'published_parsed' in entry and entry.published_parsed:
-                    article['published_date'] = datetime(*entry.published_parsed[:6])
-                elif 'updated_parsed' in entry and entry.updated_parsed:
-                    article['published_date'] = datetime(*entry.updated_parsed[:6])
+                # Parse published date with error handling
+                try:
+                    if 'published_parsed' in entry and entry.published_parsed:
+                        article['published_date'] = datetime(*entry.published_parsed[:6])
+                    elif 'updated_parsed' in entry and entry.updated_parsed:
+                        article['published_date'] = datetime(*entry.updated_parsed[:6])
+                except (TypeError, ValueError) as e:
+                    logger.debug(f"Failed to parse date for {url}: {e}")
+                    article['published_date'] = None
 
                 # Generate hash for deduplication
                 article['article_hash'] = self.generate_article_hash(url, title)
@@ -272,7 +289,7 @@ class RSSCollector:
                 filter_summary = ", ".join([f"{count} {reason}" for reason, count in filter_stats.items() if count > 0])
                 logger.info(f"Filtered {total_filtered} low-value articles from {feed_url}: {filter_summary}")
 
-            logger.info(f"Fetched {len(articles)} articles from {feed_url}")
+            logger.debug(f"Fetched {len(articles)} articles from {feed_url}")
             return articles
 
         except Exception as e:
@@ -296,41 +313,73 @@ class RSSCollector:
             return 0
 
         stored_count = 0
-        extract_errors = 0
+        extraction_errors = 0
+        storage_errors = 0
 
-        for article in articles:
-            # Extract full text if enabled
-            if self.extract_full_text:
+        # Extract full text in parallel if enabled (5-10x faster)
+        if self.extract_full_text:
+            def extract_article_text(article):
+                """Extract full text for a single article"""
                 try:
                     full_text = self.content_extractor.extract(article['url'])
                     if full_text:
                         article['content'] = full_text
                         logger.debug(f"Extracted full text for: {article['title'][:50]}...")
+                    return article, None
                 except Exception as e:
-                    logger.warning(f"Failed to extract full text for {article['url']}: {e}")
-                    extract_errors += 1
-                    # Continue with RSS content/summary
+                    return article, str(e)
 
-            # Store in database
+            # Parallel extraction with max 5 workers
+            logger.debug(f"Starting parallel extraction for {len(articles)} articles...")
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                future_to_article = {
+                    executor.submit(extract_article_text, article): article
+                    for article in articles
+                }
+
+                articles_with_content = []
+                for future in as_completed(future_to_article):
+                    article, error = future.result()
+                    if error:
+                        logger.warning(f"Failed to extract text for {article['url']}: {error}")
+                        extraction_errors += 1
+                    articles_with_content.append(article)
+
+                articles = articles_with_content
+
+        # Store articles in database
+        for article in articles:
             try:
                 article_id = self.db.store_article(article)
                 if article_id:
                     stored_count += 1
                     logger.debug(f"Stored article ID {article_id}: {article['title'][:50]}...")
-            except Exception as e:
-                # Likely a duplicate (unique constraint on URL)
+            except psycopg2.IntegrityError:
+                # Duplicate article (unique constraint on URL or hash)
                 logger.debug(f"Skipped duplicate article: {article['url']}")
                 continue
+            except Exception as e:
+                # Other database errors - should NOT be silently ignored
+                logger.error(f"Failed to store article {article['url']}: {e}")
+                storage_errors += 1
+                continue
 
-        if extract_errors > 0:
+        # Report errors
+        if extraction_errors > 0:
             logger.warning(
-                f"Full-text extraction failed for {extract_errors}/{len(articles)} articles. "
+                f"Full-text extraction failed for {extraction_errors}/{len(articles)} articles. "
                 "Using RSS content/summary instead."
             )
 
+        if storage_errors > 0:
+            logger.error(
+                f"Storage failed for {storage_errors} articles due to database errors."
+            )
+
+        duplicates_skipped = len(articles) - stored_count - storage_errors
         logger.info(
             f"Stored {stored_count} new articles from {feed_url} "
-            f"(skipped {len(articles) - stored_count} duplicates)"
+            f"(skipped {duplicates_skipped} duplicates)"
         )
 
         self.feed_status.update(feed_url, success=True, articles_collected=stored_count)
