@@ -12,17 +12,17 @@
 :80 {
     # API (FastAPI) - must come first for priority
     handle /api/* {
-        reverse_proxy api:8000
+        reverse_proxy vermont-api:8000
     }
 
     # Health check endpoint
     handle /health {
-        reverse_proxy api:8000
+        reverse_proxy vermont-api:8000
     }
 
     # Frontend (Next.js) - catch all other paths including /_next/*
     handle {
-        reverse_proxy frontend:3000
+        reverse_proxy vermont-frontend:3000
     }
 
     # Security headers
@@ -46,17 +46,17 @@
 # {$DOMAIN} {
 #     # API (FastAPI) - must come first for priority
 #     handle /api/* {
-#         reverse_proxy api:8000
+#         reverse_proxy vermont-api:8000
 #     }
 #
 #     # Health check endpoint
 #     handle /health {
-#         reverse_proxy api:8000
+#         reverse_proxy vermont-api:8000
 #     }
 #
 #     # Frontend (Next.js) - catch all other paths including /_next/*
 #     handle {
-#         reverse_proxy frontend:3000
+#         reverse_proxy vermont-frontend:3000
 #     }
 #
 #     # Security headers (enhanced for HTTPS)
