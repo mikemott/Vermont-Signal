@@ -58,7 +58,7 @@ export default function ArticleLibrary({ entityColors, onArticleClick }: Article
   const [selectedSource, setSelectedSource] = useState<string>('all');
   const [selectedEntity, setSelectedEntity] = useState<string | null>(null);
   const [selectedEntityType, setSelectedEntityType] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<'latest' | 'confidence'>('latest');
+  const [sortBy, setSortBy] = useState<'latest' | 'oldest' | 'most_entities'>('latest');
   const [currentPage, setCurrentPage] = useState(1);
   const articlesPerPage = 9;
 
@@ -162,17 +162,25 @@ export default function ArticleLibrary({ entityColors, onArticleClick }: Article
 
     // Sort
     if (sortBy === 'latest') {
+      filtered = [...filtered].sort((a, b) => {
+        const dateA = new Date(a.published_date).getTime();
+        const dateB = new Date(b.published_date).getTime();
+        return dateB - dateA; // Newest first
+      });
+    } else if (sortBy === 'oldest') {
+      filtered = [...filtered].sort((a, b) => {
+        const dateA = new Date(a.published_date).getTime();
+        const dateB = new Date(b.published_date).getTime();
+        return dateA - dateB; // Oldest first
+      });
+    } else if (sortBy === 'most_entities') {
       filtered = [...filtered].sort((a, b) =>
-        new Date(b.date).getTime() - new Date(a.date).getTime()
-      );
-    } else {
-      filtered = [...filtered].sort((a, b) =>
-        b.metadata.overall_confidence - a.metadata.overall_confidence
+        b.fact_count - a.fact_count
       );
     }
 
     return filtered;
-  }, [searchQuery, selectedSource, selectedEntity, sortBy]);
+  }, [articles, searchQuery, selectedSource, selectedEntity, sortBy]);
 
   // Pagination
   const totalPages = Math.ceil(filteredArticles.length / articlesPerPage);
@@ -296,11 +304,12 @@ export default function ArticleLibrary({ entityColors, onArticleClick }: Article
           {/* Sort */}
           <select
             value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as 'latest' | 'confidence')}
+            onChange={(e) => setSortBy(e.target.value as 'latest' | 'oldest' | 'most_entities')}
             className="px-4 py-2 border border-gray-300 rounded-lg bg-white text-sm focus:ring-2 focus:ring-[#0f1c3f] focus:border-transparent outline-none"
           >
             <option value="latest">Latest First</option>
-            <option value="confidence">Highest Confidence</option>
+            <option value="oldest">Oldest First</option>
+            <option value="most_entities">Most Entities</option>
           </select>
 
           {/* Active Entity Filter */}
