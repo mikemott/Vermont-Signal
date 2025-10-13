@@ -12,8 +12,11 @@ from slowapi.errors import RateLimitExceeded
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 import os
+import logging
 
 from vermont_news_analyzer.modules.database import VermontSignalDatabase
+
+logger = logging.getLogger(__name__)
 
 # Rate Limiting
 limiter = Limiter(key_func=get_remote_address)
@@ -482,10 +485,10 @@ def get_article_entity_network(request: Request, article_id: int):
                     'count': 1
                 })
 
-    # Get article title for context
-    cur.execute("SELECT title FROM articles WHERE id = %s", (article_id,))
-    article_row = cur.fetchone()
-    article_title = article_row[0] if article_row else f"Article {article_id}"
+            # Get article title for context
+            cur.execute("SELECT title FROM articles WHERE id = %s", (article_id,))
+            article_row = cur.fetchone()
+            article_title = article_row[0] if article_row else f"Article {article_id}"
 
     return {
         'nodes': entities,
@@ -899,16 +902,31 @@ def generate_relationships(
 
 @app.get("/api/health")
 def health_check():
-    """Health check endpoint"""
+    """Health check endpoint - returns 200 if healthy, 503 if unhealthy"""
     # Test database connection pool
     db_status = 'disconnected'
+    is_healthy = True
+
     try:
         with db.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute('SELECT 1')
                 db_status = 'connected'
-    except Exception:
+    except Exception as e:
         db_status = 'disconnected'
+        is_healthy = False
+        logger.error(f"Health check failed - database unreachable: {e}")
+
+    if not is_healthy:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                'status': 'unhealthy',
+                'timestamp': datetime.now().isoformat(),
+                'database': db_status,
+                'error': 'Database connection failed'
+            }
+        )
 
     return {
         'status': 'healthy',
