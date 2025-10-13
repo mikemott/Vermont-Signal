@@ -74,8 +74,6 @@ class VermontSignalDatabase:
 
         self.pool_size = pool_size
         self.connection_pool = None
-        # Deprecated: kept for backward compatibility, will be removed
-        self.conn = None
 
     def connect(self):
         """
@@ -101,10 +99,6 @@ class VermontSignalDatabase:
                 )
                 logger.info(f"Database connection pool created (size: {self.pool_size}) for: {self.db_config['database']}")
 
-            # Get a connection for backward compatibility
-            # This is deprecated - use get_connection() context manager instead
-            self.conn = self.connection_pool.getconn()
-
         except Exception as e:
             logger.error(f"Database connection pool creation failed: {e}")
             raise
@@ -114,10 +108,6 @@ class VermontSignalDatabase:
         if self.connection_pool:
             self.connection_pool.closeall()
             logger.info("Database connection pool closed")
-        elif self.conn:
-            # Fallback for deprecated single connection
-            self.conn.close()
-            logger.info("Database connection closed")
 
     @contextmanager
     def get_connection(self):
@@ -132,11 +122,19 @@ class VermontSignalDatabase:
         Yields:
             psycopg2.connection: Database connection from pool
         """
-        conn = self.connection_pool.getconn()
+        conn = None
         try:
+            conn = self.connection_pool.getconn()
             yield conn
-        finally:
-            self.connection_pool.putconn(conn)
+        except Exception as e:
+            # Ensure connection is returned to pool even if error occurs
+            if conn:
+                self.connection_pool.putconn(conn)
+            raise
+        else:
+            # Normal execution - return connection to pool
+            if conn:
+                self.connection_pool.putconn(conn)
 
     def init_schema(self):
         """Create database schema for V2"""
@@ -539,6 +537,8 @@ class VermontSignalDatabase:
 
         # Second pass: deduplicate and merge similar entities
         unique_facts = {}
+        updates_to_apply = []  # Track key updates to apply after iteration
+
         for fact in facts:
             entity = fact.get('entity_normalized') or fact.get('entity')
             entity_type = fact.get('type')
@@ -558,10 +558,12 @@ class VermontSignalDatabase:
 
                 # Keep the shorter name (usually more general)
                 if len(entity) < len(matched_key[0]):
-                    # Update key to use shorter name
-                    unique_facts[(entity, entity_type)] = existing
-                    del unique_facts[matched_key]
-                    matched_key = (entity, entity_type)
+                    # Schedule key update instead of modifying during iteration
+                    updates_to_apply.append({
+                        'old_key': matched_key,
+                        'new_key': (entity, entity_type),
+                        'data': existing
+                    })
 
                 # Merge confidence (take max)
                 if fact.get('confidence', 0) > existing.get('confidence', 0):
@@ -585,6 +587,12 @@ class VermontSignalDatabase:
                     # Use normalized entity name for storage
                     fact['entity'] = entity
                     unique_facts[key] = fact
+
+        # Apply deferred key updates
+        for update in updates_to_apply:
+            if update['old_key'] in unique_facts:
+                unique_facts[update['new_key']] = unique_facts[update['old_key']]
+                del unique_facts[update['old_key']]
 
         # Use INSERT ... ON CONFLICT to handle database-level duplicates
         insert_sql = """

@@ -13,6 +13,7 @@ from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 import os
 import logging
+import secrets
 
 from vermont_news_analyzer.modules.database import VermontSignalDatabase
 
@@ -45,7 +46,8 @@ def verify_admin_token(credentials: HTTPAuthorizationCredentials = Security(secu
             detail="Server misconfiguration: ADMIN_API_KEY not set"
         )
 
-    if credentials.credentials != admin_token:
+    # Use secrets.compare_digest to prevent timing attacks
+    if not secrets.compare_digest(credentials.credentials, admin_token):
         raise HTTPException(
             status_code=401,
             detail="Invalid authentication credentials"
@@ -136,8 +138,8 @@ def get_articles(
         params.append(source)
 
     if days:
-        query += " AND a.published_date >= CURRENT_DATE - INTERVAL '%s days'"
-        params.append(days)
+        query += " AND a.published_date >= CURRENT_DATE - INTERVAL %s"
+        params.append(f'{days} days')
 
     query += " ORDER BY a.published_date DESC LIMIT %s OFFSET %s"
     params.extend([limit, offset])
@@ -348,7 +350,7 @@ def get_entity_network(
             FROM facts
             WHERE article_id IN (
                 SELECT id FROM articles
-                WHERE published_date >= CURRENT_DATE - INTERVAL '%s days'
+                WHERE published_date >= CURRENT_DATE - INTERVAL %s
             )
             GROUP BY entity, entity_type
             HAVING COUNT(*) >= 2  -- At least 2 mentions
@@ -361,7 +363,7 @@ def get_entity_network(
 
     with db.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(entity_query, (days, limit))
+            cur.execute(entity_query, (f'{days} days', limit))
             entity_rows = cur.fetchall()
 
             entities = []
@@ -524,7 +526,7 @@ def get_entity_network_view(
         WHERE entity = %s
           AND article_id IN (
               SELECT id FROM articles
-              WHERE published_date >= CURRENT_DATE - INTERVAL '%s days'
+              WHERE published_date >= CURRENT_DATE - INTERVAL %s
           )
         GROUP BY entity_type
         ORDER BY mention_count DESC
@@ -533,7 +535,7 @@ def get_entity_network_view(
 
     with db.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(focal_entity_query, (entity_name, days))
+            cur.execute(focal_entity_query, (entity_name, f'{days} days'))
             focal_row = cur.fetchone()
 
             if not focal_row:
@@ -551,7 +553,7 @@ def get_entity_network_view(
             WHERE entity = %s
               AND article_id IN (
                   SELECT id FROM articles
-                  WHERE published_date >= CURRENT_DATE - INTERVAL '%s days'
+                  WHERE published_date >= CURRENT_DATE - INTERVAL %s
               )
         ),
         connected_entities AS (
@@ -569,7 +571,7 @@ def get_entity_network_view(
 
     with db.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(connected_entities_query, (entity_name, days, entity_name, limit))
+            cur.execute(connected_entities_query, (entity_name, f'{days} days', entity_name, limit))
             connected_rows = cur.fetchall()
 
             # Build entity list starting with focal entity
@@ -608,7 +610,7 @@ def get_entity_network_view(
           AND entity_b = ANY(%s)
           AND article_id IN (
               SELECT id FROM articles
-              WHERE published_date >= CURRENT_DATE - INTERVAL '%s days'
+              WHERE published_date >= CURRENT_DATE - INTERVAL %s
           )
         GROUP BY entity_a, entity_b, relationship_type, relationship_description, confidence
         ORDER BY occurrence_count DESC
@@ -617,7 +619,7 @@ def get_entity_network_view(
     with db.get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(relationships_query,
-                       (entity_name, entity_name, entity_list, entity_list, days))
+                       (entity_name, entity_name, entity_list, entity_list, f'{days} days'))
             rel_rows = cur.fetchall()
 
             relationships = []

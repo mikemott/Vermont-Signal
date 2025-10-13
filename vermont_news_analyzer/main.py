@@ -129,6 +129,12 @@ class VermontNewsPipeline:
             f"Gemini extracted {len(gemini_result.extracted_facts)} facts"
         )
 
+        # Store LLM token usage for cost tracking
+        llm_usage = {
+            'claude': claude_result.metadata.get('usage', {}) if claude_result.metadata else {},
+            'gemini': gemini_result.metadata.get('usage', {}) if gemini_result.metadata else {}
+        }
+
         # ===================================================================
         # TIER 2: CROSS-VALIDATION AND CONFLICT RESOLUTION
         # ===================================================================
@@ -168,6 +174,8 @@ class VermontNewsPipeline:
                 validation_result.consensus_summary = arbitration_result.consensus_summary
                 validation_result.merged_facts = arbitration_result.extracted_facts
                 validation_result.metadata['arbitration_used'] = True
+                # Store GPT usage for cost tracking
+                llm_usage['gpt'] = arbitration_result.metadata.get('usage', {}) if arbitration_result.metadata else {}
             else:
                 logger.warning("Arbitration failed, using original merged output")
 
@@ -209,7 +217,8 @@ class VermontNewsPipeline:
             topics=topics,
             metadata={
                 **processed_article.metadata,
-                **validation_result.metadata
+                **validation_result.metadata,
+                'llm_usage': llm_usage  # Include token usage for cost tracking
             }
         )
 

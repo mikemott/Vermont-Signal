@@ -45,9 +45,10 @@ class CostProtection:
             WHERE DATE(timestamp) = CURRENT_DATE
         """
 
-        with self.db.conn.cursor() as cur:
-            cur.execute(query)
-            return float(cur.fetchone()[0])
+        with self.db.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query)
+                return float(cur.fetchone()[0])
 
     def check_budget(self) -> Dict[str, any]:
         """
@@ -306,6 +307,81 @@ class BatchProcessor:
 
         return stats
 
+    def _log_api_costs(
+        self,
+        article_id: int,
+        pipeline_result: Dict
+    ):
+        """Extract and log API costs from pipeline metadata"""
+        metadata = pipeline_result.get('metadata', {})
+        llm_usage = metadata.get('llm_usage', {})
+
+        if not llm_usage:
+            logger.warning(f"No LLM usage data found for article {article_id}")
+            return
+
+        # Cost constants (per 1M tokens)
+        CLAUDE_INPUT = 3.00
+        CLAUDE_OUTPUT = 15.00
+        GEMINI_INPUT = 0.075
+        GEMINI_OUTPUT = 0.30
+        GPT_INPUT = 0.15
+        GPT_OUTPUT = 0.60
+
+        # Log Claude costs
+        if 'claude' in llm_usage and llm_usage['claude']:
+            usage = llm_usage['claude']
+            input_tokens = usage.get('input_tokens', 0)
+            output_tokens = usage.get('output_tokens', 0)
+            cost = (input_tokens * CLAUDE_INPUT + output_tokens * CLAUDE_OUTPUT) / 1_000_000
+
+            self.db.log_api_cost(
+                article_id=article_id,
+                provider='anthropic',
+                model='claude-sonnet-4',
+                operation_type='extraction',
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost=cost
+            )
+            logger.debug(f"Logged Claude cost: ${cost:.6f} ({input_tokens} in, {output_tokens} out)")
+
+        # Log Gemini costs
+        if 'gemini' in llm_usage and llm_usage['gemini']:
+            usage = llm_usage['gemini']
+            input_tokens = usage.get('input_tokens', 0)
+            output_tokens = usage.get('output_tokens', 0)
+            cost = (input_tokens * GEMINI_INPUT + output_tokens * GEMINI_OUTPUT) / 1_000_000
+
+            self.db.log_api_cost(
+                article_id=article_id,
+                provider='google',
+                model='gemini-2.5-flash',
+                operation_type='extraction',
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost=cost
+            )
+            logger.debug(f"Logged Gemini cost: ${cost:.6f} ({input_tokens} in, {output_tokens} out)")
+
+        # Log GPT costs (if arbitration was used)
+        if 'gpt' in llm_usage and llm_usage['gpt']:
+            usage = llm_usage['gpt']
+            input_tokens = usage.get('prompt_tokens', 0)
+            output_tokens = usage.get('completion_tokens', 0)
+            cost = (input_tokens * GPT_INPUT + output_tokens * GPT_OUTPUT) / 1_000_000
+
+            self.db.log_api_cost(
+                article_id=article_id,
+                provider='openai',
+                model='gpt-4o-mini',
+                operation_type='arbitration',
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost=cost
+            )
+            logger.debug(f"Logged GPT cost: ${cost:.6f} ({input_tokens} in, {output_tokens} out)")
+
     def _store_results(
         self,
         article_id: int,
@@ -327,6 +403,9 @@ class BatchProcessor:
             extraction_result_id=extraction_result_id,
             facts=pipeline_result['extracted_facts']
         )
+
+        # Log API costs for budget tracking
+        self._log_api_costs(article_id, pipeline_result)
 
         logger.debug(f"Stored results for article {article_id} in database")
 
