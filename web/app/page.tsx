@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { SignalIcon } from './components/SignalIcon';
 import EntityNetworkD3 from './components/EntityNetworkD3';
 import EntityDetailsPanel, { EntityData } from './components/EntityDetailsPanel';
@@ -9,83 +9,18 @@ import ArticleDetailsPanel from './components/ArticleDetailsPanel';
 import { enrichedEntityData } from './data/enrichedEntityData';
 import { Article as LegacyArticle } from './data/sampleArticles';
 import * as api from './lib/api';
+import { ENTITY_COLORS } from './lib/constants';
 
 type TabView = 'article' | 'network' | 'topics' | 'models';
-
-// Sample Vermont news entity data
-const sampleEntities = [
-  { id: 'phil-scott', label: 'Phil Scott', type: 'PERSON' },
-  { id: 'peter-welch', label: 'Peter Welch', type: 'PERSON' },
-  { id: 'bernie-sanders', label: 'Bernie Sanders', type: 'PERSON' },
-  { id: 'molly-gray', label: 'Molly Gray', type: 'PERSON' },
-  { id: 'montpelier', label: 'Montpelier', type: 'LOCATION' },
-  { id: 'burlington', label: 'Burlington', type: 'LOCATION' },
-  { id: 'brattleboro', label: 'Brattleboro', type: 'LOCATION' },
-  { id: 'lake-champlain', label: 'Lake Champlain', type: 'LOCATION' },
-  { id: 'vt-legislature', label: 'Vermont Legislature', type: 'ORG' },
-  { id: 'uvm', label: 'University of Vermont', type: 'ORG' },
-  { id: 'vtdigger', label: 'VTDigger', type: 'ORG' },
-  { id: 'green-mountain-power', label: 'Green Mountain Power', type: 'ORG' },
-  { id: 'climate-bill', label: 'Climate Bill 2024', type: 'EVENT' },
-  { id: 'town-meeting', label: 'Town Meeting Day', type: 'EVENT' },
-];
-
-const sampleConnections = [
-  { source: 'phil-scott', target: 'vt-legislature', label: 'signed' },
-  { source: 'phil-scott', target: 'climate-bill', label: 'vetoed' },
-  { source: 'peter-welch', target: 'burlington', label: 'represents' },
-  { source: 'bernie-sanders', target: 'burlington', label: 'former mayor' },
-  { source: 'molly-gray', target: 'climate-bill', label: 'supports' },
-  { source: 'vt-legislature', target: 'montpelier', label: 'located in' },
-  { source: 'uvm', target: 'burlington', label: 'located in' },
-  { source: 'green-mountain-power', target: 'lake-champlain', label: 'operates near' },
-  { source: 'climate-bill', target: 'vt-legislature', label: 'proposed by' },
-  { source: 'town-meeting', target: 'brattleboro', label: 'held in' },
-  { source: 'vtdigger', target: 'climate-bill', label: 'covered' },
-  { source: 'uvm', target: 'climate-bill', label: 'researched' },
-  { source: 'bernie-sanders', target: 'peter-welch', label: 'colleagues' },
-];
-
-const entityColors: Record<string, string> = {
-  PERSON: '#0f1c3f',         // Navy
-  LOCATION: '#d4a574',       // Gold
-  ORG: '#5a8c69',            // Forest Green
-  ORGANIZATION: '#5a8c69',   // Forest Green (alias)
-  EVENT: '#a0516d',          // Burgundy
-  DATE: '#7c3aed',           // Purple
-  PRODUCT: '#ea580c',        // Orange
-  GPE: '#d4a574',            // Gold (Geographic/Political Entity - same as LOCATION)
-  LOC: '#d4a574',            // Gold (Location alias)
-};
 
 export default function VermontSignal() {
   const [activeTab, setActiveTab] = useState<TabView>('article');
   const [selectedEntity, setSelectedEntity] = useState<EntityData | null>(null);
   const [selectedArticle, setSelectedArticle] = useState<LegacyArticle | null>(null);
-  const [stats, setStats] = useState<api.Stats | null>(null);
-  const [healthStatus, setHealthStatus] = useState<'healthy' | 'unhealthy' | 'checking'>('checking');
 
   // Network view state
   const [networkArticleId, setNetworkArticleId] = useState<number | null>(null);
   const [networkEntityName, setNetworkEntityName] = useState<string | null>(null);
-
-  // Fetch system stats and health on mount
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [statsData, healthData] = await Promise.all([
-          api.getStats(),
-          api.checkHealth()
-        ]);
-        setStats(statsData);
-        setHealthStatus(healthData.status === 'healthy' ? 'healthy' : 'unhealthy');
-      } catch (error) {
-        console.error('Failed to fetch initial data:', error);
-        setHealthStatus('unhealthy');
-      }
-    };
-    fetchData();
-  }, []);
 
   const tabs = [
     { id: 'article' as TabView, label: 'Article Intelligence' },
@@ -99,33 +34,11 @@ export default function VermontSignal() {
       {/* Header */}
       <header className="border-b-4 border-[#0f1c3f] pb-4 pt-8">
         <div className="max-w-7xl mx-auto px-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-5 flex-1 justify-center">
-              <SignalIcon className="w-16 h-16" />
-              <h1 className="text-6xl font-black text-[#0f1c3f] tracking-tight">
-                Vermont Signal
-              </h1>
-            </div>
-            {/* API Health Indicator */}
-            <div className="absolute right-6 top-8">
-              <div className="flex items-center gap-2 text-xs">
-                <div className={`w-2 h-2 rounded-full ${
-                  healthStatus === 'healthy' ? 'bg-green-500' :
-                  healthStatus === 'unhealthy' ? 'bg-red-500' :
-                  'bg-yellow-500 animate-pulse'
-                }`} />
-                <span className="text-gray-600 uppercase tracking-wide">
-                  {healthStatus === 'healthy' ? 'API Connected' :
-                   healthStatus === 'unhealthy' ? 'API Offline' :
-                   'Connecting...'}
-                </span>
-              </div>
-              {stats && healthStatus === 'healthy' && (
-                <div className="text-xs text-gray-500 mt-1 text-right">
-                  {stats.articles.total} articles • ${stats.costs.daily.toFixed(2)} today
-                </div>
-              )}
-            </div>
+          <div className="flex items-center justify-center gap-5">
+            <SignalIcon className="w-16 h-16" />
+            <h1 className="text-6xl font-black text-[#0f1c3f] tracking-tight">
+              Vermont Signal
+            </h1>
           </div>
         </div>
       </header>
@@ -183,14 +96,14 @@ export default function VermontSignal() {
       <EntityDetailsPanel
         entity={selectedEntity}
         onClose={() => setSelectedEntity(null)}
-        entityColors={entityColors}
+        entityColors={ENTITY_COLORS}
       />
 
       {/* Article Details Panel */}
       <ArticleDetailsPanel
         article={selectedArticle}
         onClose={() => setSelectedArticle(null)}
-        entityColors={entityColors}
+        entityColors={ENTITY_COLORS}
         onEntityClick={(entityName) => {
           // Close article panel and switch to entity-centric network view
           setSelectedArticle(null);
@@ -209,7 +122,7 @@ function ArticleIntelligence({
 }: {
   onArticleClick: (article: LegacyArticle) => void;
 }) {
-  return <ArticleLibrary entityColors={entityColors} onArticleClick={onArticleClick} />;
+  return <ArticleLibrary entityColors={ENTITY_COLORS} onArticleClick={onArticleClick} />;
 }
 
 function EntityNetworkBuilder({
@@ -370,8 +283,8 @@ function EntityNetworkBuilder({
                   onClick={() => handleEntitySearch(entity)}
                   className="px-3 py-2 rounded-lg text-sm font-medium border-2 transition-all hover:shadow-md"
                   style={{
-                    borderColor: entityColors[type],
-                    color: entityColors[type],
+                    borderColor: ENTITY_COLORS[type],
+                    color: ENTITY_COLORS[type],
                     backgroundColor: 'white'
                   }}
                 >
@@ -429,27 +342,27 @@ function EntityNetworkBuilder({
       {/* Legend */}
       <div className="bg-white border border-gray-200 rounded p-4 flex flex-wrap gap-6 text-sm">
         <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded-full border-2" style={{ borderColor: entityColors.PERSON }}></div>
+          <div className="w-4 h-4 rounded-full border-2" style={{ borderColor: ENTITY_COLORS.PERSON }}></div>
           <span>Person</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded-full border-2" style={{ borderColor: entityColors.LOCATION }}></div>
+          <div className="w-4 h-4 rounded-full border-2" style={{ borderColor: ENTITY_COLORS.LOCATION }}></div>
           <span>Location</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded-full border-2" style={{ borderColor: entityColors.ORGANIZATION }}></div>
+          <div className="w-4 h-4 rounded-full border-2" style={{ borderColor: ENTITY_COLORS.ORGANIZATION }}></div>
           <span>Organization</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded-full border-2" style={{ borderColor: entityColors.EVENT }}></div>
+          <div className="w-4 h-4 rounded-full border-2" style={{ borderColor: ENTITY_COLORS.EVENT }}></div>
           <span>Event</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded-full border-2" style={{ borderColor: entityColors.DATE }}></div>
+          <div className="w-4 h-4 rounded-full border-2" style={{ borderColor: ENTITY_COLORS.DATE }}></div>
           <span>Date</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded-full border-2" style={{ borderColor: entityColors.PRODUCT }}></div>
+          <div className="w-4 h-4 rounded-full border-2" style={{ borderColor: ENTITY_COLORS.PRODUCT }}></div>
           <span>Product</span>
         </div>
       </div>
@@ -463,7 +376,7 @@ function EntityNetworkBuilder({
             target: c.target,
             label: c.label || c.relationship_type || 'related'
           }))}
-          entityColors={entityColors}
+          entityColors={ENTITY_COLORS}
           onEntityClick={handleEntityClick}
         />
       )}
