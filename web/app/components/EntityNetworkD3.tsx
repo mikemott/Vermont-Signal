@@ -38,6 +38,8 @@ export default function EntityNetworkD3({
 
   // Detect mobile viewport
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+
     const checkMobile = () => {
       setIsMobile(window.innerWidth < 768);
     };
@@ -48,6 +50,9 @@ export default function EntityNetworkD3({
 
   useEffect(() => {
     if (!svgRef.current || !containerRef.current) return;
+    if (!entities || entities.length === 0) return;
+    if (!connections) return;
+    if (typeof window === 'undefined') return;
 
     // Clear previous content
     d3.select(svgRef.current).selectAll('*').remove();
@@ -154,14 +159,14 @@ export default function EntityNetworkD3({
     node.append('circle')
       .attr('r', nodeRadius)
       .attr('fill', d => {
-        const color = entityColors[d.type];
+        const color = entityColors[d.type] || '#6b7280';
         // Convert hex to rgba with transparency
         const r = parseInt(color.slice(1, 3), 16);
         const g = parseInt(color.slice(3, 5), 16);
         const b = parseInt(color.slice(5, 7), 16);
         return `rgba(${r}, ${g}, ${b}, 0.1)`;
       })
-      .attr('stroke', d => entityColors[d.type])
+      .attr('stroke', d => entityColors[d.type] || '#6b7280')
       .attr('stroke-width', isMobile ? 4 : 3)
       .style('filter', 'drop-shadow(0px 2px 4px rgba(0,0,0,0.1))');
 
@@ -212,7 +217,7 @@ export default function EntityNetworkD3({
       .attr('dy', 0)
       .attr('font-size', fontSize)
       .attr('font-weight', 600)
-      .attr('fill', d => entityColors[d.type])
+      .attr('fill', d => entityColors[d.type] || '#6b7280')
       .style('pointer-events', 'none')
       .call(wrapText);
 

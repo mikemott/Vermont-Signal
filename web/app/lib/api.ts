@@ -67,6 +67,7 @@ export interface EntityNode {
   id: string;
   label: string;
   type: string;
+  weight?: number;
   mention_count?: number;
   relationship_count?: number;
 }

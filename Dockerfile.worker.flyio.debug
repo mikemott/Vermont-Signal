@@ -1,0 +1,69 @@
+# ============================================================================
+# Vermont Signal V2 - Worker Service (Fly.io DEBUG VERSION)
+# ============================================================================
+# Simplified version that just keeps container alive for debugging
+# ============================================================================
+
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y build-essential gcc && rm -rf /var/lib/apt/lists/*
+COPY requirements.txt .
+RUN pip install --user --no-cache-dir -r requirements.txt
+RUN pip install --user --no-cache-dir psycopg2-binary==2.9.10
+
+# ============================================================================
+# Runtime
+# ============================================================================
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y postgresql-client curl && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /root/.local /root/.local
+ENV PATH=/root/.local/bin:$PATH
+
+COPY vermont_news_analyzer/ vermont_news_analyzer/
+
+RUN mkdir -p vermont_news_analyzer/data/cache vermont_news_analyzer/logs logs /models
+
+ENV SPACY_DATA=/models/spacy
+ENV TRANSFORMERS_CACHE=/models/transformers
+ENV HF_HOME=/models/huggingface
+
+# Simple startup script that just keeps container alive
+RUN echo '#!/bin/bash\n\
+set -e\n\
+echo "=== DEBUG MODE - Vermont Signal V2 Worker ==="\n\
+echo "Container started at: $(date)"\n\
+echo ""\n\
+echo "Environment variables:"\n\
+env | grep -E "^(DATABASE_|ANTHROPIC_|GOOGLE_|OPENAI_|SPACY_|TRANSFORMERS_)" || echo "No relevant env vars found"\n\
+echo ""\n\
+echo "Volume check:"\n\
+ls -la /models/ || echo "/models not accessible"\n\
+echo ""\n\
+echo "Creating model directories..."\n\
+mkdir -p /models/spacy /models/transformers /models/huggingface\n\
+echo "Model directories created"\n\
+echo ""\n\
+echo "Testing database connection..."\n\
+if [ -n "$DATABASE_URL" ]; then\n\
+    psql "$DATABASE_URL" -c "SELECT version();" 2>&1 | head -5 || echo "Database connection failed"\n\
+else\n\
+    echo "DATABASE_URL not set"\n\
+fi\n\
+echo ""\n\
+echo "Testing spaCy installation..."\n\
+python -c "import spacy; print(f'\''spaCy version: {spacy.__version__}'\'')" || echo "spaCy import failed"\n\
+echo ""\n\
+echo "=== Container is running - sleeping indefinitely for debugging ==="\n\
+tail -f /dev/null\n\
+' > /app/start-debug.sh && chmod +x /app/start-debug.sh
+
+CMD ["/app/start-debug.sh"]

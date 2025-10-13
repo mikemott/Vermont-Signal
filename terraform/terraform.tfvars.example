@@ -1,0 +1,14 @@
+# Hetzner Cloud API Token
+# Get from: https://console.hetzner.cloud/ -> Security -> API Tokens
+hcloud_token = "your-hetzner-api-token-here"
+
+# Your SSH public key (contents of ~/.ssh/id_rsa.pub or ~/.ssh/id_ed25519.pub)
+ssh_public_key = "ssh-ed25519 AAAAC3... your-email@example.com"
+
+# Optional: Your domain name (leave empty to use IP address)
+# If set, Caddy will automatically provision HTTPS certificates
+# You'll need to point your DNS A record to the server IP after creation
+domain_name = ""  # e.g., "vermontsiganl.com" or "api.yourapp.com"
+
+# Server name (optional, defaults to "vermont-signal")
+server_name = "vermont-signal"

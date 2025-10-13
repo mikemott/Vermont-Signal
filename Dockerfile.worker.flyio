@@ -1,0 +1,133 @@
+# ============================================================================
+# Vermont Signal V2 - Worker Service (Fly.io Optimized)
+# ============================================================================
+# Key optimization: Models cached in persistent volume (/models)
+# - First deploy: Downloads models (~5 min)
+# - Subsequent deploys: Instant startup (~30 sec)
+# ============================================================================
+
+# ============================================================================
+# Stage 1: Builder - Install dependencies with build tools
+# ============================================================================
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+
+# Install Python dependencies to user directory
+RUN pip install --user --no-cache-dir -r requirements.txt
+
+# Install additional worker dependencies
+RUN pip install --user --no-cache-dir psycopg2-binary==2.9.10
+
+# ❌ DO NOT download models during build!
+# ✅ Models will be downloaded at runtime to /models volume
+
+
+# ============================================================================
+# Stage 2: Runtime - Minimal production image with ML tools
+# ============================================================================
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /app
+
+# Install only runtime dependencies (no build tools!)
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    cron \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Python packages from builder
+COPY --from=builder /root/.local /root/.local
+
+# Make sure scripts in .local are usable
+ENV PATH=/root/.local/bin:$PATH
+
+# Copy application files
+COPY vermont_news_analyzer/ vermont_news_analyzer/
+
+# Create necessary directories
+RUN mkdir -p vermont_news_analyzer/data/cache vermont_news_analyzer/logs logs /models
+
+# ============================================================================
+# Model Caching Configuration
+# ============================================================================
+# Tell spaCy and transformers to use the persistent volume
+ENV SPACY_DATA=/models/spacy
+ENV TRANSFORMERS_CACHE=/models/transformers
+ENV HF_HOME=/models/huggingface
+
+# Create model download script
+RUN echo '#!/bin/bash\n\
+set -e\n\
+echo "==> Checking ML model cache at /models"\n\
+\n\
+# Create cache directories if they dont exist\n\
+mkdir -p /models/spacy /models/transformers /models/huggingface\n\
+\n\
+# Check if spaCy model exists\n\
+if [ ! -d "/models/spacy/en_core_web_trf-3.7.3" ]; then\n\
+    echo "==> Downloading spaCy en_core_web_trf (~600MB)..."\n\
+    python -m spacy download en_core_web_trf --no-cache-dir\n\
+    echo "==> spaCy model downloaded and cached"\n\
+else\n\
+    echo "==> spaCy model found in cache (skipping download)"\n\
+fi\n\
+\n\
+# Verify model can load\n\
+python -c "import spacy; nlp = spacy.load('\''en_core_web_trf'\''); print(f'\''✅ spaCy model loaded successfully ({nlp.meta['\''name'\'']})'\'')"\n\
+\n\
+echo "==> All models ready!"\n\
+' > /app/download_models.sh && chmod +x /app/download_models.sh
+
+# Create cron job for batch processing
+# Run at 2am Eastern Time (7am UTC) - after V1 collector has run
+RUN echo '# Vermont Signal V2 Batch Processing' > /etc/cron.d/v2-batch && \
+    echo 'SHELL=/bin/bash' >> /etc/cron.d/v2-batch && \
+    echo 'PATH=/usr/local/bin:/usr/bin:/bin' >> /etc/cron.d/v2-batch && \
+    echo '# Run batch processor at 2am ET (7am UTC)' >> /etc/cron.d/v2-batch && \
+    echo '0 7 * * * root cd /app && env $(cat /app/.env | xargs) /usr/local/bin/python -m vermont_news_analyzer.batch_processor --limit 20 >> /app/logs/batch.log 2>&1' >> /etc/cron.d/v2-batch && \
+    echo '' >> /etc/cron.d/v2-batch
+
+RUN chmod 0644 /etc/cron.d/v2-batch
+RUN crontab /etc/cron.d/v2-batch
+RUN touch /var/log/cron.log /app/logs/batch.log
+
+# Create startup script with model download
+RUN echo '#!/bin/bash\n\
+set -e\n\
+echo "Vermont Signal V2 Worker starting..."\n\
+\n\
+# Download models on first run (cached for subsequent runs)\n\
+echo "==> Initializing ML models..."\n\
+/app/download_models.sh\n\
+\n\
+# Export environment variables to file for cron jobs\n\
+echo "==> Exporting environment variables for cron..."\n\
+printenv | grep -E "^(DATABASE_|ANTHROPIC_|GOOGLE_|OPENAI_|CLAUDE_|GEMINI_|SPACY_|TRANSFORMERS_|HF_)" > /app/.env\n\
+\n\
+echo "==> Initializing database schema..."\n\
+python -c "from vermont_news_analyzer.modules.database import VermontSignalDatabase; db = VermontSignalDatabase(); db.connect(); db.init_schema(); db.disconnect()" 2>&1 | tee /app/logs/init.log\n\
+\n\
+echo "==> Running initial batch processing (20 articles)..."\n\
+python -m vermont_news_analyzer.batch_processor --limit 20 2>&1 | tee /app/logs/startup-batch.log\n\
+\n\
+echo "✅ Worker initialized. Next scheduled run: 2am ET (7am UTC)"\n\
+echo "==> Starting cron for scheduled runs..."\n\
+cron\n\
+tail -f /var/log/cron.log /app/logs/*.log\n\
+' > /app/start.sh && chmod +x /app/start.sh
+
+CMD ["/app/start.sh"]

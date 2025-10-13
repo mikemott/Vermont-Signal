@@ -269,10 +269,11 @@ class BatchProcessor:
                 logger.info(f"✓ Processed successfully in {processing_time:.1f}s")
 
                 # Log key metrics
-                logger.info(f"  Facts extracted: {len(result['extracted_facts'])}")
-                logger.info(f"  High confidence: {result['metadata']['high_confidence_facts']}")
-                logger.info(f"  Wikidata enriched: {result['metadata']['wikidata_enriched']}")
-                logger.info(f"  spaCy F1 score: {result['spacy_validation']['comparison']['f1_score']:.2%}")
+                logger.info(f"  Facts extracted: {len(result.get('extracted_facts', []))}")
+                logger.info(f"  High confidence: {result.get('metadata', {}).get('high_confidence_facts', 0)}")
+                logger.info(f"  Wikidata enriched: {result.get('metadata', {}).get('wikidata_enriched', 0)}")
+                spacy_f1 = result.get('spacy_validation', {}).get('comparison', {}).get('f1_score', 0)
+                logger.info(f"  spaCy F1 score: {spacy_f1:.2%}")
 
             except Exception as e:
                 logger.error(f"✗ Processing failed: {e}")

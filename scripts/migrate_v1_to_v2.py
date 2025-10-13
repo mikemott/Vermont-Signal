@@ -7,12 +7,13 @@ import psycopg2
 import logging
 import sys
 import re
+import os
 from pathlib import Path
 from typing import Dict, List, Tuple
 from datetime import datetime, timedelta
 
 # Add project to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from vermont_news_analyzer.modules.database import VermontSignalDatabase
 

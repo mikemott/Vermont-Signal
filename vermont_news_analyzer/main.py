@@ -182,9 +182,11 @@ class VermontNewsPipeline:
             llm_facts=validation_result.merged_facts
         )
 
+        entity_count = spacy_audit.get('entity_count', 0)
+        f1_score = spacy_audit.get('comparison', {}).get('f1_score', 0)
         logger.info(
-            f"spaCy NER complete: {spacy_audit['entity_count']} entities, "
-            f"F1 score vs LLMs: {spacy_audit['comparison']['f1_score']:.2%}"
+            f"spaCy NER complete: {entity_count} entities, "
+            f"F1 score vs LLMs: {f1_score:.2%}"
         )
 
         # Topic modeling (optional for single article)

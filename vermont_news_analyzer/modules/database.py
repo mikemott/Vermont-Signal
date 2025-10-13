@@ -4,12 +4,14 @@ PostgreSQL integration for storing multi-model ensemble extraction results
 """
 
 import psycopg2
+from psycopg2 import pool
 from psycopg2.extras import execute_values, Json
 import logging
 from typing import Dict, List, Optional
 from datetime import datetime
 import os
 import json
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +44,14 @@ class VermontSignalDatabase:
     - API cost tracking for 3-model pipeline
     """
 
-    def __init__(self, db_config: Dict = None):
+    def __init__(self, db_config: Dict = None, pool_size: int = 10):
         """
-        Initialize database connection
+        Initialize database connection pool
 
         Args:
             db_config: Optional dict with host, database, user, password
                       Or None to use environment variables
+            pool_size: Maximum number of connections in pool (default 10)
         """
         if db_config is None:
             # Check if DATABASE_URL is set (Railway format)
@@ -69,28 +72,71 @@ class VermontSignalDatabase:
             self.db_config = db_config
             self.database_url = None
 
+        self.pool_size = pool_size
+        self.connection_pool = None
+        # Deprecated: kept for backward compatibility, will be removed
         self.conn = None
 
     def connect(self):
-        """Establish database connection"""
+        """
+        Establish database connection pool
+
+        Creates a ThreadedConnectionPool with minconn=2, maxconn=pool_size
+        """
         try:
             if self.database_url:
-                # Connect using DATABASE_URL (Railway/Heroku style)
-                self.conn = psycopg2.connect(self.database_url)
-                logger.info(f"Connected to database via DATABASE_URL")
+                # Create pool using DATABASE_URL (Railway/Heroku style)
+                self.connection_pool = pool.ThreadedConnectionPool(
+                    minconn=2,
+                    maxconn=self.pool_size,
+                    dsn=self.database_url
+                )
+                logger.info(f"Database connection pool created (size: {self.pool_size}) via DATABASE_URL")
             else:
-                # Connect using individual parameters
-                self.conn = psycopg2.connect(**self.db_config)
-                logger.info(f"Connected to database: {self.db_config['database']}")
+                # Create pool using individual parameters
+                self.connection_pool = pool.ThreadedConnectionPool(
+                    minconn=2,
+                    maxconn=self.pool_size,
+                    **self.db_config
+                )
+                logger.info(f"Database connection pool created (size: {self.pool_size}) for: {self.db_config['database']}")
+
+            # Get a connection for backward compatibility
+            # This is deprecated - use get_connection() context manager instead
+            self.conn = self.connection_pool.getconn()
+
         except Exception as e:
-            logger.error(f"Database connection failed: {e}")
+            logger.error(f"Database connection pool creation failed: {e}")
             raise
 
     def disconnect(self):
-        """Close database connection"""
-        if self.conn:
+        """Close all connections in the pool"""
+        if self.connection_pool:
+            self.connection_pool.closeall()
+            logger.info("Database connection pool closed")
+        elif self.conn:
+            # Fallback for deprecated single connection
             self.conn.close()
             logger.info("Database connection closed")
+
+    @contextmanager
+    def get_connection(self):
+        """
+        Context manager for getting a connection from the pool
+
+        Usage:
+            with db.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT ...")
+
+        Yields:
+            psycopg2.connection: Database connection from pool
+        """
+        conn = self.connection_pool.getconn()
+        try:
+            yield conn
+        finally:
+            self.connection_pool.putconn(conn)
 
     def init_schema(self):
         """Create database schema for V2"""
@@ -181,7 +227,10 @@ class VermontSignalDatabase:
 
             -- Metadata
             note TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+            -- Unique constraint to prevent duplicate entities
+            CONSTRAINT unique_fact UNIQUE (article_id, entity, entity_type)
         );
 
         CREATE INDEX IF NOT EXISTS idx_facts_article ON facts(article_id);
@@ -276,13 +325,13 @@ class VermontSignalDatabase:
         """
 
         try:
-            with self.conn.cursor() as cur:
-                cur.execute(schema_sql)
-                self.conn.commit()
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(schema_sql)
+                    conn.commit()
             logger.info("Database schema initialized successfully")
         except Exception as e:
             logger.error(f"Schema initialization failed: {e}")
-            self.conn.rollback()
             raise
 
     def store_article(self, article_data: Dict) -> int:
@@ -316,26 +365,26 @@ class VermontSignalDatabase:
         """
 
         try:
-            with self.conn.cursor() as cur:
-                cur.execute(insert_sql, (
-                    article_hash,
-                    article_data['title'],
-                    article_data['url'],
-                    article_data.get('content'),
-                    article_data.get('summary'),
-                    article_data.get('source'),
-                    article_data.get('author'),
-                    article_data.get('published_date')
-                ))
-                article_id = cur.fetchone()[0]
-                self.conn.commit()
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(insert_sql, (
+                        article_hash,
+                        article_data['title'],
+                        article_data['url'],
+                        article_data.get('content'),
+                        article_data.get('summary'),
+                        article_data.get('source'),
+                        article_data.get('author'),
+                        article_data.get('published_date')
+                    ))
+                    article_id = cur.fetchone()[0]
+                    conn.commit()
 
             logger.info(f"Stored article ID: {article_id}")
             return article_id
 
         except Exception as e:
             logger.error(f"Failed to store article: {e}")
-            self.conn.rollback()
             raise
 
     def store_extraction_result(
@@ -356,8 +405,8 @@ class VermontSignalDatabase:
             extraction_result_id: Database ID
         """
         metadata = extraction_data.get('metadata', {})
-        spacy_val = extraction_data.get('spacy_validation', {})
-        spacy_comp = spacy_val.get('comparison', {})
+        spacy_val = extraction_data.get('spacy_validation', {}) or {}
+        spacy_comp = spacy_val.get('comparison', {}) or {}
 
         insert_sql = """
             INSERT INTO extraction_results (
@@ -376,29 +425,96 @@ class VermontSignalDatabase:
         """
 
         try:
-            with self.conn.cursor() as cur:
-                cur.execute(insert_sql, (
-                    article_id,
-                    extraction_data.get('consensus_summary'),
-                    metadata.get('conflict_report', {}).get('summary_similarity'),
-                    metadata.get('conflict_report', {}).get('has_conflicts', False),
-                    metadata.get('arbitration_used', False),
-                    spacy_val.get('entity_count'),
-                    spacy_comp.get('precision'),
-                    spacy_comp.get('recall'),
-                    spacy_comp.get('f1_score'),
-                    processing_time
-                ))
-                result_id = cur.fetchone()[0]
-                self.conn.commit()
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(insert_sql, (
+                        article_id,
+                        extraction_data.get('consensus_summary'),
+                        metadata.get('conflict_report', {}).get('summary_similarity'),
+                        metadata.get('conflict_report', {}).get('has_conflicts', False),
+                        metadata.get('arbitration_used', False),
+                        spacy_val.get('entity_count', 0),
+                        spacy_comp.get('precision', 0.0),
+                        spacy_comp.get('recall', 0.0),
+                        spacy_comp.get('f1_score', 0.0),
+                        processing_time
+                    ))
+                    result_id = cur.fetchone()[0]
+                    conn.commit()
 
             logger.info(f"Stored extraction result ID: {result_id}")
             return result_id
 
         except Exception as e:
             logger.error(f"Failed to store extraction result: {e}")
-            self.conn.rollback()
             raise
+
+    def _normalize_entity(self, entity_name: str, entity_type: str) -> str:
+        """
+        Normalize entity names to prevent duplicates like 'Mike Doenges' vs 'Mayor Mike Doenges'
+
+        Args:
+            entity_name: Raw entity name
+            entity_type: Entity type (PERSON, ORGANIZATION, etc.)
+
+        Returns:
+            Normalized entity name
+        """
+        if not entity_name:
+            return entity_name
+
+        # Common titles/prefixes to strip (case-insensitive)
+        if entity_type == 'PERSON':
+            titles = [
+                'mayor', 'governor', 'senator', 'representative', 'president',
+                'vice president', 'congressman', 'congresswoman', 'judge',
+                'justice', 'sheriff', 'chief', 'commissioner', 'secretary',
+                'mr', 'mrs', 'ms', 'dr', 'prof', 'professor'
+            ]
+
+            # Strip city/state prefixes like "Rutland City Mayor"
+            # Pattern: [City Name] [Title]
+            words = entity_name.split()
+            cleaned_words = []
+
+            for i, word in enumerate(words):
+                word_lower = word.lower().rstrip('.,')
+
+                # Skip titles
+                if word_lower in titles:
+                    continue
+
+                # Skip "City" if preceded by a capitalized word (likely a city name)
+                if word_lower == 'city' and i > 0:
+                    continue
+
+                cleaned_words.append(word)
+
+            return ' '.join(cleaned_words).strip()
+
+        elif entity_type == 'ORGANIZATION':
+            # Remove "the" prefix
+            if entity_name.lower().startswith('the '):
+                return entity_name[4:].strip()
+
+        return entity_name
+
+    def _entities_match(self, entity1: str, entity2: str, type1: str, type2: str) -> bool:
+        """
+        Check if two entities are likely the same person/org
+
+        Returns True if:
+        - One entity name is a substring of the other
+        - Both are the same type
+        """
+        if type1 != type2:
+            return False
+
+        e1_lower = entity1.lower()
+        e2_lower = entity2.lower()
+
+        # If one is contained in the other, they're likely the same
+        return e1_lower in e2_lower or e2_lower in e1_lower
 
     def store_facts(
         self,
@@ -407,13 +523,70 @@ class VermontSignalDatabase:
         facts: List[Dict]
     ):
         """
-        Store extracted facts from ensemble
+        Store extracted facts from ensemble with deduplication and entity normalization
 
         Args:
             article_id: Article database ID
             extraction_result_id: Extraction result ID
             facts: List of fact dicts with entity, type, confidence, etc.
         """
+        # First pass: normalize entity names
+        for fact in facts:
+            original_entity = fact.get('entity', '')
+            entity_type = fact.get('type', '')
+            normalized = self._normalize_entity(original_entity, entity_type)
+            fact['entity_normalized'] = normalized
+
+        # Second pass: deduplicate and merge similar entities
+        unique_facts = {}
+        for fact in facts:
+            entity = fact.get('entity_normalized') or fact.get('entity')
+            entity_type = fact.get('type')
+            key = (entity, entity_type)
+
+            # Check if this entity matches any existing entity (substring matching)
+            matched_key = None
+            for existing_key in unique_facts.keys():
+                existing_entity, existing_type = existing_key
+                if self._entities_match(entity, existing_entity, entity_type, existing_type):
+                    matched_key = existing_key
+                    break
+
+            if matched_key:
+                # Merge with existing entity
+                existing = unique_facts[matched_key]
+
+                # Keep the shorter name (usually more general)
+                if len(entity) < len(matched_key[0]):
+                    # Update key to use shorter name
+                    unique_facts[(entity, entity_type)] = existing
+                    del unique_facts[matched_key]
+                    matched_key = (entity, entity_type)
+
+                # Merge confidence (take max)
+                if fact.get('confidence', 0) > existing.get('confidence', 0):
+                    existing['confidence'] = fact.get('confidence')
+                    existing['event_description'] = fact.get('event_description')
+
+                # Merge source_models
+                existing_sources = set(existing.get('sources', []))
+                new_sources = set(fact.get('sources', []))
+                existing['sources'] = list(existing_sources | new_sources)
+
+                # Prefer Wikidata info from higher confidence source
+                if fact.get('wikidata_id') and not existing.get('wikidata_id'):
+                    existing['wikidata_id'] = fact.get('wikidata_id')
+                    existing['wikidata_label'] = fact.get('wikidata_label')
+                    existing['wikidata_description'] = fact.get('wikidata_description')
+                    existing['wikidata_properties'] = fact.get('wikidata_properties')
+            else:
+                # New unique entity
+                if key not in unique_facts:
+                    # Use normalized entity name for storage
+                    fact['entity'] = entity
+                    unique_facts[key] = fact
+
+        # Use INSERT ... ON CONFLICT to handle database-level duplicates
         insert_sql = """
             INSERT INTO facts (
                 article_id, extraction_result_id, entity, entity_type,
@@ -422,10 +595,18 @@ class VermontSignalDatabase:
                 wikidata_properties, note
             )
             VALUES %s
+            ON CONFLICT (article_id, entity, entity_type)
+            DO UPDATE SET
+                confidence = GREATEST(facts.confidence, EXCLUDED.confidence),
+                source_models = array_union(facts.source_models, EXCLUDED.source_models),
+                wikidata_id = COALESCE(EXCLUDED.wikidata_id, facts.wikidata_id),
+                wikidata_label = COALESCE(EXCLUDED.wikidata_label, facts.wikidata_label),
+                wikidata_description = COALESCE(EXCLUDED.wikidata_description, facts.wikidata_description),
+                wikidata_properties = COALESCE(EXCLUDED.wikidata_properties, facts.wikidata_properties)
         """
 
         values = []
-        for fact in facts:
+        for fact in unique_facts.values():
             values.append((
                 article_id,
                 extraction_result_id,
@@ -442,15 +623,23 @@ class VermontSignalDatabase:
             ))
 
         try:
-            with self.conn.cursor() as cur:
-                execute_values(cur, insert_sql, values)
-                self.conn.commit()
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Create array_union function if it doesn't exist
+                    cur.execute("""
+                        CREATE OR REPLACE FUNCTION array_union(anyarray, anyarray)
+                        RETURNS anyarray AS $$
+                            SELECT ARRAY(SELECT unnest($1) UNION SELECT unnest($2))
+                        $$ LANGUAGE SQL IMMUTABLE;
+                    """)
 
-            logger.info(f"Stored {len(facts)} facts for article {article_id}")
+                    execute_values(cur, insert_sql, values)
+                    conn.commit()
+
+            logger.info(f"Stored {len(values)} unique facts for article {article_id} (deduplicated from {len(facts)})")
 
         except Exception as e:
             logger.error(f"Failed to store facts: {e}")
-            self.conn.rollback()
             raise
 
     def log_api_cost(
@@ -484,24 +673,24 @@ class VermontSignalDatabase:
         """
 
         try:
-            with self.conn.cursor() as cur:
-                cur.execute(insert_sql, (
-                    article_id,
-                    provider,
-                    model,
-                    operation_type,
-                    input_tokens,
-                    output_tokens,
-                    input_tokens + output_tokens,
-                    cost
-                ))
-                self.conn.commit()
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(insert_sql, (
+                        article_id,
+                        provider,
+                        model,
+                        operation_type,
+                        input_tokens,
+                        output_tokens,
+                        input_tokens + output_tokens,
+                        cost
+                    ))
+                    conn.commit()
 
             logger.debug(f"Logged API cost: ${cost:.6f} ({provider}/{model})")
 
         except Exception as e:
             logger.error(f"Failed to log API cost: {e}")
-            self.conn.rollback()
 
     def get_monthly_cost(self) -> float:
         """Get total API costs for current month"""
@@ -511,9 +700,10 @@ class VermontSignalDatabase:
             WHERE DATE_TRUNC('month', timestamp) = DATE_TRUNC('month', CURRENT_DATE)
         """
 
-        with self.conn.cursor() as cur:
-            cur.execute(query)
-            return float(cur.fetchone()[0])
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query)
+                return float(cur.fetchone()[0])
 
     def get_unprocessed_articles(self, limit: int = 50) -> List[Dict]:
         """Get articles that haven't been processed through V2 pipeline"""
@@ -526,23 +716,24 @@ class VermontSignalDatabase:
             LIMIT %s
         """
 
-        with self.conn.cursor() as cur:
-            cur.execute(query, (limit,))
-            rows = cur.fetchall()
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (limit,))
+                rows = cur.fetchall()
 
-            articles = []
-            for row in rows:
-                articles.append({
-                    'id': row[0],
-                    'title': row[1],
-                    'content': row[2],
-                    'summary': row[3],
-                    'source': row[4],
-                    'published_date': row[5],
-                    'url': row[6]
-                })
+                articles = []
+                for row in rows:
+                    articles.append({
+                        'id': row[0],
+                        'title': row[1],
+                        'content': row[2],
+                        'summary': row[3],
+                        'source': row[4],
+                        'published_date': row[5],
+                        'url': row[6]
+                    })
 
-            return articles
+                return articles
 
     def mark_article_processed(
         self,
@@ -561,6 +752,48 @@ class VermontSignalDatabase:
 
         status = 'completed' if success else 'failed'
 
-        with self.conn.cursor() as cur:
-            cur.execute(update_sql, (status, error, article_id))
-            self.conn.commit()
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(update_sql, (status, error, article_id))
+                conn.commit()
+
+    def generate_cooccurrence_relationships(self, days: int = 30):
+        """
+        Generate entity relationships based on co-occurrence in articles
+
+        Creates relationships between entities that appear together in the same article.
+        This is a simpler alternative to LLM-extracted relationships.
+
+        Args:
+            days: Only process articles from last N days (default 30)
+        """
+        query = f"""
+        INSERT INTO entity_relationships (article_id, entity_a, entity_b, relationship_type, confidence)
+        SELECT DISTINCT
+            f1.article_id,
+            LEAST(f1.entity, f2.entity) as entity_a,
+            GREATEST(f1.entity, f2.entity) as entity_b,
+            'co-occurrence' as relationship_type,
+            (f1.confidence + f2.confidence) / 2.0 as confidence
+        FROM facts f1
+        JOIN facts f2 ON f1.article_id = f2.article_id
+        JOIN articles a ON a.id = f1.article_id
+        WHERE f1.entity < f2.entity
+          AND a.published_date >= CURRENT_DATE - INTERVAL '{days} days'
+          AND a.processing_status = 'completed'
+        ON CONFLICT (article_id, entity_a, entity_b, relationship_type) DO NOTHING
+        """
+
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query)
+                    rows_inserted = cur.rowcount
+                    conn.commit()
+
+            logger.info(f"Generated {rows_inserted} co-occurrence relationships from last {days} days")
+            return rows_inserted
+
+        except Exception as e:
+            logger.error(f"Failed to generate co-occurrence relationships: {e}")
+            raise

@@ -1,5 +1,6 @@
 # Environment variables
 .env
+.env.hetzner
 
 # Python
 __pycache__/
@@ -73,3 +74,16 @@ migration_analysis.log
 
 # Test outputs
 test_comparison/
+
+# Terraform
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/terraform.tfvars
+
+# Hetzner deployment
+.hetzner-server-ip
+
+# Archived hosting provider configs (Railway, Fly.io, Render)
+hosting_archive/
