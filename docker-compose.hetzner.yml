@@ -72,7 +72,12 @@ services:
     container_name: vermont-worker
     restart: unless-stopped
     environment:
-      - DATABASE_URL=postgresql://vermont_signal:${DATABASE_PASSWORD:-changeme123}@postgres:5432/vermont_signal
+      # Use individual params to avoid URL encoding issues with special chars in password
+      - DATABASE_HOST=postgres
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=vermont_signal
+      - DATABASE_USER=vermont_signal
+      - DATABASE_PASSWORD=${DATABASE_PASSWORD:-changeme123}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
