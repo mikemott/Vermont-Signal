@@ -229,6 +229,25 @@ class TestTooShortFilter:
         summary = "A" * 300  # Long summary
         assert is_too_short(title, content, summary, min_length=200) is False
 
+    @pytest.mark.unit
+    @pytest.mark.filter
+    def test_strips_html_tags_before_length_check(self):
+        """Should strip HTML tags before checking length"""
+        title = "CLAWS"
+        # Content with HTML tags - total 264 chars with tags, only ~45 chars text
+        content = '<p>All this cuz of a faulty inspection sticker</p>\n\n<figure class="wp-block-image size-large"><img alt="" class="wp-image-268440" height="1024" src="https://example.com/image.png" width="831" /></figure>'
+        # Should be filtered as too short (text content < 200 chars)
+        assert is_too_short(title, content, min_length=200) is True
+
+    @pytest.mark.unit
+    @pytest.mark.filter
+    def test_adequate_text_with_html_tags(self):
+        """Should NOT filter articles with adequate text even with HTML tags"""
+        title = "Vermont Legislature Passes Climate Bill"
+        # Content with HTML tags but enough text
+        content = '<p>' + ('A' * 250) + '</p><div>More content here</div>'
+        assert is_too_short(title, content, min_length=200) is False
+
 
 # ============================================================================
 # REVIEW FILTER TESTS

@@ -350,8 +350,12 @@ def is_too_short(title: str, content: str, summary: str = '', min_length: int = 
     # Use the longest available text
     text = content or summary or ''
 
+    # Strip HTML tags to get actual text content
+    # Simple regex approach: remove everything between < and >
+    text_without_html = re.sub(r'<[^>]+>', '', text)
+
     # Count actual text length (excluding whitespace)
-    text_length = len(text.strip())
+    text_length = len(text_without_html.strip())
 
     return text_length < min_length
 
