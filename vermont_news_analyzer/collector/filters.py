@@ -331,18 +331,21 @@ def is_event_listing(title: str, summary: str = '') -> bool:
     return False
 
 
-def is_too_short(title: str, content: str, summary: str = '', min_length: int = 200) -> bool:
+def is_too_short(title: str, content: str, summary: str = '', min_words: int = 50) -> bool:
     """
     Check if article is too short to contain substantial news content
 
     Very short articles are often briefs, announcements, or fragments
     that don't provide enough context for fact extraction.
 
+    Uses word count instead of character count for more consistent and
+    reliable filtering across different writing styles.
+
     Args:
         title: Article title
         content: Article content/text
         summary: Article summary
-        min_length: Minimum character length (default 200)
+        min_words: Minimum word count (default 50)
 
     Returns:
         True if too short, False otherwise
@@ -354,10 +357,11 @@ def is_too_short(title: str, content: str, summary: str = '', min_length: int = 
     # Simple regex approach: remove everything between < and >
     text_without_html = re.sub(r'<[^>]+>', '', text)
 
-    # Count actual text length (excluding whitespace)
-    text_length = len(text_without_html.strip())
+    # Count words (split on whitespace)
+    words = text_without_html.split()
+    word_count = len(words)
 
-    return text_length < min_length
+    return word_count < min_words
 
 
 def is_review(title: str, summary: str = '') -> bool:
@@ -620,7 +624,7 @@ def should_filter_article(
     title: str,
     content: str = '',
     summary: str = '',
-    min_length: int = 200
+    min_words: int = 50
 ) -> Tuple[bool, str]:
     """
     Master filter function - checks all low-value content filters
@@ -629,7 +633,7 @@ def should_filter_article(
         title: Article title
         content: Article content/text
         summary: Article summary
-        min_length: Minimum character length for articles
+        min_words: Minimum word count for articles (default 50)
 
     Returns:
         Tuple of (should_filter: bool, reason: str)
@@ -663,7 +667,7 @@ def should_filter_article(
     if is_weather_alert(title, summary):
         return True, "weather_alert"
 
-    if is_too_short(title, content, summary, min_length):
+    if is_too_short(title, content, summary, min_words):
         return True, "too_short"
 
     return False, "passed"

@@ -202,23 +202,24 @@ class TestEventListingFilter:
 # ============================================================================
 
 class TestTooShortFilter:
-    """Test minimum length requirements"""
+    """Test minimum word count requirements"""
 
     @pytest.mark.unit
     @pytest.mark.filter
     def test_very_short_content(self):
-        """Should filter very short articles"""
+        """Should filter very short articles (< 50 words)"""
         title = "Short Title"
-        content = "This is too short."  # < 200 chars
+        content = "This is too short."  # Only 4 words
         assert is_too_short(title, content) is True
 
     @pytest.mark.unit
     @pytest.mark.filter
-    def test_adequate_length_content(self):
-        """Should NOT filter articles with adequate content"""
+    def test_adequate_word_count(self):
+        """Should NOT filter articles with adequate word count (>= 50 words)"""
         title = "Vermont Legislature Passes Climate Bill"
-        content = "A" * 300  # 300 characters
-        assert is_too_short(title, content, min_length=200) is False
+        # Create content with exactly 50 words
+        content = " ".join(["word"] * 50)
+        assert is_too_short(title, content, min_words=50) is False
 
     @pytest.mark.unit
     @pytest.mark.filter
@@ -226,27 +227,43 @@ class TestTooShortFilter:
         """Should use summary if content is missing"""
         title = "Title"
         content = ""
-        summary = "A" * 300  # Long summary
-        assert is_too_short(title, content, summary, min_length=200) is False
+        # Create summary with 60 words
+        summary = " ".join(["word"] * 60)
+        assert is_too_short(title, content, summary, min_words=50) is False
 
     @pytest.mark.unit
     @pytest.mark.filter
-    def test_strips_html_tags_before_length_check(self):
-        """Should strip HTML tags before checking length"""
+    def test_strips_html_tags_before_word_count(self):
+        """Should strip HTML tags before counting words"""
         title = "CLAWS"
-        # Content with HTML tags - total 264 chars with tags, only ~45 chars text
+        # Content with HTML tags - only 8 words of actual text
         content = '<p>All this cuz of a faulty inspection sticker</p>\n\n<figure class="wp-block-image size-large"><img alt="" class="wp-image-268440" height="1024" src="https://example.com/image.png" width="831" /></figure>'
-        # Should be filtered as too short (text content < 200 chars)
-        assert is_too_short(title, content, min_length=200) is True
+        # Should be filtered as too short (8 words < 50 words)
+        assert is_too_short(title, content, min_words=50) is True
 
     @pytest.mark.unit
     @pytest.mark.filter
     def test_adequate_text_with_html_tags(self):
-        """Should NOT filter articles with adequate text even with HTML tags"""
+        """Should NOT filter articles with adequate words even with HTML tags"""
         title = "Vermont Legislature Passes Climate Bill"
-        # Content with HTML tags but enough text
-        content = '<p>' + ('A' * 250) + '</p><div>More content here</div>'
-        assert is_too_short(title, content, min_length=200) is False
+        # Content with HTML tags but enough words (60 words)
+        words = " ".join(["word"] * 60)
+        content = f'<p>{words}</p><div>More content here</div>'
+        assert is_too_short(title, content, min_words=50) is False
+
+    @pytest.mark.unit
+    @pytest.mark.filter
+    def test_word_count_more_reliable_than_char_count(self):
+        """Word count should be more consistent than character count"""
+        # 10 long words (100+ chars) vs 50 short words (100+ chars)
+        long_words = " ".join(["antidisestablishmentarianism"] * 10)  # 10 words, 280 chars
+        short_words = " ".join(["hi"] * 50)  # 50 words, 150 chars
+
+        # Long words but low count - should filter
+        assert is_too_short("Title", long_words, min_words=50) is True
+
+        # Short words but good count - should NOT filter
+        assert is_too_short("Title", short_words, min_words=50) is False
 
 
 # ============================================================================
