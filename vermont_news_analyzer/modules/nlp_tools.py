@@ -216,6 +216,59 @@ class SpacyNER:
 class TopicModeler:
     """Topic modeling using BERTopic for semantic clustering"""
 
+    # Comprehensive stop words for Vermont news analysis
+    # Includes common verbs, temporal words, generic nouns that don't represent topics
+    CUSTOM_STOP_WORDS = {
+        # Common reporting verbs
+        'said', 'says', 'told', 'asked', 'announced', 'reported', 'stated',
+        'explained', 'noted', 'added', 'continued', 'began', 'started',
+
+        # Generic people/groups
+        'man', 'woman', 'people', 'person', 'men', 'women', 'group', 'groups',
+        'official', 'officials', 'resident', 'residents', 'member', 'members',
+
+        # Temporal words (covered by dates, not topical)
+        'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+        'january', 'february', 'march', 'april', 'may', 'june', 'july',
+        'august', 'september', 'october', 'november', 'december',
+        'day', 'days', 'week', 'weeks', 'month', 'months', 'year', 'years',
+        'today', 'yesterday', 'tomorrow', 'tonight', 'morning', 'afternoon', 'evening',
+
+        # Generic locations (not specific Vermont places)
+        'area', 'areas', 'place', 'places', 'town', 'city', 'state', 'country',
+        'county', 'region', 'location', 'locations',
+
+        # Numbers and quantifiers
+        'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+        'first', 'second', 'third', 'many', 'several', 'few', 'lot', 'number',
+
+        # Generic actions/states
+        'make', 'makes', 'made', 'take', 'takes', 'took', 'get', 'gets', 'got',
+        'give', 'gives', 'gave', 'go', 'goes', 'went', 'come', 'comes', 'came',
+        'want', 'wants', 'wanted', 'need', 'needs', 'needed', 'know', 'knows', 'knew',
+        'think', 'thinks', 'thought', 'see', 'sees', 'saw', 'look', 'looks', 'looked',
+        'find', 'finds', 'found', 'work', 'works', 'worked', 'working',
+
+        # Generic objects/concepts
+        'thing', 'things', 'something', 'anything', 'everything', 'nothing',
+        'way', 'ways', 'time', 'times', 'part', 'parts', 'case', 'cases',
+        'point', 'points', 'issue', 'issues', 'problem', 'problems',
+
+        # Articles/pronouns/conjunctions (usually caught by stop words, but just in case)
+        'the', 'a', 'an', 'this', 'that', 'these', 'those', 'it', 'its',
+        'he', 'she', 'they', 'them', 'their', 'his', 'her', 'our', 'your',
+        'and', 'or', 'but', 'if', 'when', 'where', 'who', 'what', 'which',
+
+        # Reporting/article structure
+        'article', 'story', 'report', 'news', 'according', 'including',
+
+        # Common Vermont terms that are too generic
+        'vermont', 'vt',  # Too generic to be a topic identifier
+    }
+
+    # Minimum c-TF-IDF score threshold for keywords
+    MIN_TFIDF_SCORE = 0.05
+
     def __init__(self, min_topic_size: int = None):
         """
         Initialize topic modeler
@@ -228,6 +281,173 @@ class TopicModeler:
 
         self.min_topic_size = min_topic_size or NLPConfig.BERTOPIC_MIN_TOPIC_SIZE
         self.model = None
+
+    def _clean_html(self, text: str) -> str:
+        """
+        Clean HTML tags and artifacts from text
+
+        Args:
+            text: Raw text possibly containing HTML
+
+        Returns:
+            Cleaned text
+        """
+        import re
+        from html import unescape
+
+        # Remove script and style tags with content
+        text = re.sub(r'<script[^>]*>.*?</script>', ' ', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<style[^>]*>.*?</style>', ' ', text, flags=re.DOTALL | re.IGNORECASE)
+
+        # Remove HTML comments
+        text = re.sub(r'<!--.*?-->', ' ', text, flags=re.DOTALL)
+
+        # Remove HTML tags
+        text = re.sub(r'<[^>]+>', ' ', text)
+
+        # Unescape HTML entities
+        text = unescape(text)
+
+        # Remove common HTML/CSS attribute remnants
+        text = re.sub(r'\b(class|style|id|href|src|alt|rel|target|width|height)="[^"]*"', ' ', text)
+        text = re.sub(r'\b(class|style|id|href|src|alt|rel|target|width|height)=\S+', ' ', text)
+
+        # Remove common web artifacts
+        text = re.sub(r'\b(noreferrer|noopener|nofollow|relnoreferrer|styleheight)\b', ' ', text, flags=re.IGNORECASE)
+        text = re.sub(r'classwp\w+', ' ', text, flags=re.IGNORECASE)
+        text = re.sub(r'hrefhttp\S+', ' ', text)
+        text = re.sub(r'\d+tdtda', ' ', text)  # Remove table data artifacts
+        text = re.sub(r'probationli', ' ', text)  # Common artifact
+        text = re.sub(r'\bpthe\b', 'the', text)  # Fix common tag remnant
+        text = re.sub(r'\bpq\b', ' ', text)  # Remove paragraph/quote artifacts
+        text = re.sub(r'div\b', ' ', text)  # Remove div remnants
+        text = re.sub(r'figcaption', ' ', text)
+
+        # Remove multiple spaces and trim
+        text = re.sub(r'\s+', ' ', text)
+
+        return text.strip()
+
+    def _is_meaningful_keyword(self, keyword: str) -> bool:
+        """
+        Check if keyword is meaningful for topic representation
+        Filters out HTML artifacts, stop words, and generic terms
+
+        Args:
+            keyword: Keyword to check
+
+        Returns:
+            True if keyword is meaningful, False if it should be filtered
+        """
+        # Too short keywords
+        if len(keyword) < 3:
+            return False
+
+        # Not purely alphabetic (has numbers, special chars)
+        if not keyword.isalpha():
+            return False
+
+        keyword_lower = keyword.lower()
+
+        # Check against custom stop words
+        if keyword_lower in self.CUSTOM_STOP_WORDS:
+            return False
+
+        # Common HTML/web prefixes and substrings
+        html_indicators = [
+            'href', 'class', 'style', 'rel', 'alt', 'src', 'div',
+            'span', 'img', 'fig', 'wp', 'block', 'attachment',
+            'noreferrer', 'noopener', 'nofollow', 'blockquote',
+            'figcaption', 'probationli', 'classwp', 'styleheight',
+            'tdtda', 'hrefhttp', 'pthe', 'pq'
+        ]
+
+        for indicator in html_indicators:
+            if indicator in keyword_lower:
+                return False
+
+        # Contains mixed case indicating concatenated HTML (e.g. classwpBlock)
+        if keyword != keyword.lower() and keyword != keyword.title():
+            return False
+
+        return True
+
+    def _is_html_artifact(self, keyword: str) -> bool:
+        """
+        Check if keyword is likely an HTML/web artifact
+        DEPRECATED: Use _is_meaningful_keyword instead
+
+        Args:
+            keyword: Keyword to check
+
+        Returns:
+            True if keyword appears to be HTML artifact
+        """
+        return not self._is_meaningful_keyword(keyword)
+
+    def _filter_keywords_by_score(
+        self,
+        topic_words: List[Tuple[str, float]],
+        min_score: float = None
+    ) -> List[str]:
+        """
+        Filter keywords by c-TF-IDF score and meaningfulness
+
+        Args:
+            topic_words: List of (word, c-TF-IDF score) tuples from BERTopic
+            min_score: Minimum c-TF-IDF score (defaults to class constant)
+
+        Returns:
+            List of filtered, meaningful keywords
+        """
+        min_score = min_score or self.MIN_TFIDF_SCORE
+        filtered = []
+
+        for word, score in topic_words:
+            # Apply score threshold
+            if score < min_score:
+                continue
+
+            # Apply meaningfulness check (removes stop words, HTML artifacts, etc.)
+            if not self._is_meaningful_keyword(word):
+                continue
+
+            filtered.append(word)
+
+        return filtered
+
+    def _generate_topic_label(self, keywords: List[str], prefer_proper_nouns: bool = True) -> str:
+        """
+        Generate human-readable topic label from keywords
+        Now uses the single most important keyword or a short phrase
+
+        Args:
+            keywords: List of top keywords for topic (already filtered)
+            prefer_proper_nouns: Prefer capitalized words (usually more specific)
+
+        Returns:
+            Human-readable label
+        """
+        if not keywords:
+            return "Miscellaneous"
+
+        # Prefer proper nouns (capitalized words) as they're usually more specific
+        # e.g., "Montpelier" is better than "budget"
+        if prefer_proper_nouns:
+            proper_nouns = [kw for kw in keywords if kw[0].isupper()]
+            if proper_nouns:
+                # Use the top proper noun as the label
+                return proper_nouns[0].title()
+
+        # If no proper nouns or not preferring them, check for multi-word phrases
+        # BERTopic can generate phrases like "climate_change" with underscores
+        for kw in keywords:
+            if '_' in kw:
+                # Convert underscore phrases to proper format
+                return kw.replace('_', ' ').title()
+
+        # Fall back to single most important keyword
+        return keywords[0].title()
 
     def train_topics(
         self,
@@ -247,10 +467,15 @@ class TopicModeler:
 
         logger.info(f"Training BERTopic model on {len(documents)} documents")
 
+        # Clean HTML from documents
+        cleaned_documents = [self._clean_html(doc) for doc in documents]
+        logger.info("Cleaned HTML artifacts from documents")
+
         # Configure vectorizer for better topic representation
         vectorizer_model = CountVectorizer(
             ngram_range=NLPConfig.BERTOPIC_N_GRAM_RANGE,
-            stop_words='english'
+            stop_words='english',
+            min_df=2  # Ignore terms appearing in only 1 document
         ) if SKLEARN_AVAILABLE else None
 
         # Initialize BERTopic
@@ -261,30 +486,42 @@ class TopicModeler:
             verbose=False
         )
 
-        # Fit model
-        topics, probabilities = self.model.fit_transform(documents)
+        # Fit model using cleaned documents
+        topics, probabilities = self.model.fit_transform(cleaned_documents)
 
         # Get topic information
         topic_info = self.model.get_topic_info()
 
-        # Extract topic representations
+        # Extract topic representations with c-TF-IDF filtering
         topic_representations = {}
         for topic_id in set(topics):
             if topic_id != -1:  # Exclude outlier topic
-                topic_words = self.model.get_topic(topic_id)
+                topic_words = self.model.get_topic(topic_id)  # Returns (word, score) tuples
                 if topic_words:
-                    topic_representations[topic_id] = [word for word, _ in topic_words[:10]]
+                    # Apply c-TF-IDF score threshold and meaningfulness filtering
+                    filtered_keywords = self._filter_keywords_by_score(topic_words)
+                    topic_representations[topic_id] = filtered_keywords
 
-        # Create topic summaries
+        # Create topic summaries with human-readable labels
         topics_list = []
         for _, row in topic_info.iterrows():
             topic_id = row['Topic']
             if topic_id != -1:
+                filtered_keywords = topic_representations.get(topic_id, [])
+
+                # Skip topics with no meaningful keywords after filtering
+                if not filtered_keywords:
+                    logger.warning(f"Topic {topic_id} has no meaningful keywords after filtering, skipping")
+                    continue
+
+                # Generate clean human-readable label (now uses single best keyword)
+                human_label = self._generate_topic_label(filtered_keywords)
+
                 topics_list.append({
                     'topic_id': int(topic_id),
                     'count': int(row['Count']),
-                    'name': row.get('Name', f'Topic {topic_id}'),
-                    'keywords': topic_representations.get(topic_id, [])
+                    'name': human_label,
+                    'keywords': filtered_keywords[:10]  # Store top 10 filtered keywords
                 })
 
         # Document-topic assignments
