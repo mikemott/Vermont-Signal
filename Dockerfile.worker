@@ -68,11 +68,14 @@ RUN echo '# Vermont Signal V2 Scheduled Jobs' > /etc/cron.d/v2-jobs && \
     echo '' >> /etc/cron.d/v2-jobs && \
     echo '# Compute topics weekly on Sundays at 3am ET (8am UTC)' >> /etc/cron.d/v2-jobs && \
     echo '0 8 * * 0 root cd /app && env $(cat /app/.env | xargs) /usr/local/bin/python scripts/compute_topics.py --days 90 --min-topic-size 3 >> /app/logs/topics.log 2>&1' >> /etc/cron.d/v2-jobs && \
+    echo '' >> /etc/cron.d/v2-jobs && \
+    echo '# Backup database daily at 4am ET (9am UTC)' >> /etc/cron.d/v2-jobs && \
+    echo '0 9 * * * root /bin/bash /app/scripts/backup_database.sh >> /app/logs/backup.log 2>&1' >> /etc/cron.d/v2-jobs && \
     echo '' >> /etc/cron.d/v2-jobs
 
 RUN chmod 0644 /etc/cron.d/v2-jobs
 RUN crontab /etc/cron.d/v2-jobs
-RUN touch /var/log/cron.log /app/logs/batch.log /app/logs/collector.log /app/logs/topics.log
+RUN touch /var/log/cron.log /app/logs/batch.log /app/logs/collector.log /app/logs/topics.log /app/logs/backup.log
 
 # Create startup script
 RUN echo '#!/bin/bash\n\
@@ -96,6 +99,7 @@ echo "Worker initialized."\n\
 echo "  - RSS Collection: Every 4 hours"\n\
 echo "  - Batch Processing: Daily at 2am ET (7am UTC)"\n\
 echo "  - Topic Computation: Sundays at 3am ET (8am UTC)"\n\
+echo "  - Database Backup: Daily at 4am ET (9am UTC)"\n\
 echo "Starting cron for scheduled runs..."\n\
 cron\n\
 tail -f /var/log/cron.log /app/logs/*.log\n\
