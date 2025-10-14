@@ -50,22 +50,29 @@ ENV PATH=/root/.local/bin:$PATH
 
 # Copy application files
 COPY vermont_news_analyzer/ vermont_news_analyzer/
+COPY scripts/ scripts/
 
 # Create necessary directories
 RUN mkdir -p vermont_news_analyzer/data/cache vermont_news_analyzer/logs logs
 
-# Create cron job for batch processing
-# Run at 2am Eastern Time (7am UTC) - after V1 collector has run
-RUN echo '# Vermont Signal V2 Batch Processing' > /etc/cron.d/v2-batch && \
-    echo 'SHELL=/bin/bash' >> /etc/cron.d/v2-batch && \
-    echo 'PATH=/usr/local/bin:/usr/bin:/bin' >> /etc/cron.d/v2-batch && \
-    echo '# Run batch processor at 2am ET (7am UTC)' >> /etc/cron.d/v2-batch && \
-    echo '0 7 * * * root cd /app && env $(cat /app/.env | xargs) /usr/local/bin/python -m vermont_news_analyzer.batch_processor --limit 20 >> /app/logs/batch.log 2>&1' >> /etc/cron.d/v2-batch && \
-    echo '' >> /etc/cron.d/v2-batch
+# Create cron jobs for RSS collection and batch processing
+RUN echo '# Vermont Signal V2 Scheduled Jobs' > /etc/cron.d/v2-jobs && \
+    echo 'SHELL=/bin/bash' >> /etc/cron.d/v2-jobs && \
+    echo 'PATH=/usr/local/bin:/usr/bin:/bin' >> /etc/cron.d/v2-jobs && \
+    echo '' >> /etc/cron.d/v2-jobs && \
+    echo '# Collect RSS feeds every 4 hours' >> /etc/cron.d/v2-jobs && \
+    echo '0 */4 * * * root cd /app && env $(cat /app/.env | xargs) /usr/local/bin/python scripts/collect_news.py >> /app/logs/collector.log 2>&1' >> /etc/cron.d/v2-jobs && \
+    echo '' >> /etc/cron.d/v2-jobs && \
+    echo '# Process collected articles at 2am ET (7am UTC)' >> /etc/cron.d/v2-jobs && \
+    echo '0 7 * * * root cd /app && env $(cat /app/.env | xargs) /usr/local/bin/python -m vermont_news_analyzer.batch_processor --limit 50 >> /app/logs/batch.log 2>&1' >> /etc/cron.d/v2-jobs && \
+    echo '' >> /etc/cron.d/v2-jobs && \
+    echo '# Compute topics weekly on Sundays at 3am ET (8am UTC)' >> /etc/cron.d/v2-jobs && \
+    echo '0 8 * * 0 root cd /app && env $(cat /app/.env | xargs) /usr/local/bin/python scripts/compute_topics.py --days 90 --min-topic-size 3 >> /app/logs/topics.log 2>&1' >> /etc/cron.d/v2-jobs && \
+    echo '' >> /etc/cron.d/v2-jobs
 
-RUN chmod 0644 /etc/cron.d/v2-batch
-RUN crontab /etc/cron.d/v2-batch
-RUN touch /var/log/cron.log /app/logs/batch.log
+RUN chmod 0644 /etc/cron.d/v2-jobs
+RUN crontab /etc/cron.d/v2-jobs
+RUN touch /var/log/cron.log /app/logs/batch.log /app/logs/collector.log /app/logs/topics.log
 
 # Create startup script
 RUN echo '#!/bin/bash\n\
@@ -79,10 +86,16 @@ printenv | grep -E "^(DATABASE_|ANTHROPIC_|GOOGLE_|OPENAI_|CLAUDE_|GEMINI_)" > /
 echo "Initializing database schema..."\n\
 python -c "from vermont_news_analyzer.modules.database import VermontSignalDatabase; db = VermontSignalDatabase(); db.connect(); db.init_schema(); db.disconnect()" 2>&1 | tee /app/logs/init.log\n\
 \n\
-echo "Running initial batch processing (20 articles)..."\n\
-python -m vermont_news_analyzer.batch_processor --limit 20 2>&1 | tee /app/logs/startup-batch.log\n\
+echo "Running initial RSS collection..."\n\
+python scripts/collect_news.py 2>&1 | tee /app/logs/startup-collector.log\n\
 \n\
-echo "Worker initialized. Next scheduled run: 2am ET (7am UTC)"\n\
+echo "Running initial batch processing (50 articles)..."\n\
+python -m vermont_news_analyzer.batch_processor --limit 50 2>&1 | tee /app/logs/startup-batch.log\n\
+\n\
+echo "Worker initialized."\n\
+echo "  - RSS Collection: Every 4 hours"\n\
+echo "  - Batch Processing: Daily at 2am ET (7am UTC)"\n\
+echo "  - Topic Computation: Sundays at 3am ET (8am UTC)"\n\
 echo "Starting cron for scheduled runs..."\n\
 cron\n\
 tail -f /var/log/cron.log /app/logs/*.log\n\
