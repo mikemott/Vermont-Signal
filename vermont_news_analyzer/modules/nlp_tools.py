@@ -234,8 +234,8 @@ class TopicModeler:
         'day', 'days', 'week', 'weeks', 'month', 'months', 'year', 'years',
         'today', 'yesterday', 'tomorrow', 'tonight', 'morning', 'afternoon', 'evening',
 
-        # Generic locations (not specific Vermont places)
-        'area', 'areas', 'place', 'places', 'town', 'city', 'state', 'country',
+        # Generic locations (not specific Vermont places) - keep "town" and "state" as they ARE topical
+        'area', 'areas', 'place', 'places', 'city', 'country',
         'county', 'region', 'location', 'locations',
 
         # Numbers and quantifiers
@@ -252,7 +252,7 @@ class TopicModeler:
         # Generic objects/concepts
         'thing', 'things', 'something', 'anything', 'everything', 'nothing',
         'way', 'ways', 'time', 'times', 'part', 'parts', 'case', 'cases',
-        'point', 'points', 'issue', 'issues', 'problem', 'problems',
+        'point', 'points',
 
         # Articles/pronouns/conjunctions (usually caught by stop words, but just in case)
         'the', 'a', 'an', 'this', 'that', 'these', 'those', 'it', 'its',
@@ -262,12 +262,19 @@ class TopicModeler:
         # Reporting/article structure
         'article', 'story', 'report', 'news', 'according', 'including',
 
-        # Common Vermont terms that are too generic
-        'vermont', 'vt',  # Too generic to be a topic identifier
+        # Publication artifacts
+        'hot', 'press', 'hot press', 'daily', 'headlines', 'digger',
+        'local', 'stock', 'market', 'beta', 'nbc',
+
+        # Vermont-specific but too generic
+        'vermont', 'vt',
+
+        # Modifiers that aren't topics themselves
+        'like', 'new', 'just', 'now', 'well', 'good', 'best', 'better',
     }
 
-    # Minimum c-TF-IDF score threshold for keywords
-    MIN_TFIDF_SCORE = 0.05
+    # Minimum c-TF-IDF score threshold for keywords (lowered to be less aggressive)
+    MIN_TFIDF_SCORE = 0.01
 
     def __init__(self, min_topic_size: int = None):
         """
@@ -343,7 +350,11 @@ class TopicModeler:
         if len(keyword) < 3:
             return False
 
-        # Not purely alphabetic (has numbers, special chars)
+        # Filter out pure numbers or things containing numbers
+        if keyword.isdigit() or any(char.isdigit() for char in keyword):
+            return False
+
+        # Not purely alphabetic (has numbers, special chars, underscores)
         if not keyword.isalpha():
             return False
 
