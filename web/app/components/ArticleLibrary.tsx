@@ -119,7 +119,12 @@ export default function ArticleLibrary({ entityColors, onArticleClick }: Article
         setLoading(false);
       } catch (err) {
         console.error('Error fetching articles:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load articles');
+        const errorMessage = err instanceof Error
+          ? err.message
+          : typeof err === 'string'
+            ? err
+            : JSON.stringify(err);
+        setError(errorMessage);
         setArticles([]);
         setLoading(false);
       }
