@@ -182,8 +182,8 @@ export default function ArticleDetailsPanel({ article, onClose, entityColors, on
 
                 // Only include connections between displayed nodes
                 const displayConnections = networkData.connections.filter(c =>
-                  displayNodeIds.has(typeof c.source === 'string' ? c.source : c.source.id) &&
-                  displayNodeIds.has(typeof c.target === 'string' ? c.target : c.target.id)
+                  displayNodeIds.has(c.source as string) &&
+                  displayNodeIds.has(c.target as string)
                 );
 
                 return (

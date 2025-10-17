@@ -110,7 +110,7 @@ export default function EntityNetworkD3({
         .distance(linkDistance))
       .force('charge', d3.forceManyBody().strength(chargeStrength))
       .force('center', d3.forceCenter(svgWidth / 2, svgHeight / 2))
-      .force('collision', d3.forceCollide().radius(d => getNodeRadius(d.weight) + 10));
+      .force('collision', d3.forceCollide().radius(d => getNodeRadius((d as Node).weight) + 10));
 
     // Create container for zoom
     const g = svg.append('g');
