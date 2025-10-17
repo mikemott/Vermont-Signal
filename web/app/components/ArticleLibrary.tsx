@@ -68,7 +68,7 @@ export default function ArticleLibrary({ entityColors, onArticleClick }: Article
       try {
         console.log('[ArticleLibrary] Fetching articles...');
         // Fetch all articles without time restrictions
-        const data = await api.getArticles({ limit: 100, days: 36500 }); // API max is 100
+        const data = await api.getArticles({ limit: 1000, days: 36500 }); // Fetch up to 1000 articles
         console.log('[ArticleLibrary] Received data:', { count: data.articles?.length, hasArticles: !!data.articles });
 
         // Transform API articles to display format

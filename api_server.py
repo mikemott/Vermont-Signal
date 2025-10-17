@@ -101,7 +101,7 @@ def shutdown_event():
 @limiter.limit("100/minute")
 def get_articles(
     request: Request,
-    limit: int = Query(50, le=100),
+    limit: int = Query(50, le=1000),
     offset: int = Query(0, ge=0),
     source: Optional[str] = None,
     days: Optional[int] = None
@@ -112,7 +112,7 @@ def get_articles(
     Rate limit: 100 requests per minute per IP
 
     Args:
-        limit: Maximum number of articles to return (max 100)
+        limit: Maximum number of articles to return (max 1000)
         offset: Pagination offset
         source: Filter by source (e.g., 'VTDigger')
         days: Only include articles from last N days
