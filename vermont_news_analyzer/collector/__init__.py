@@ -15,9 +15,7 @@ from .filters import (
     is_sports_game,
     is_classified_ad,
     is_weather_alert,
-    should_filter_article,
-    contains_policy_keywords,
-    POLICY_WHITELIST
+    should_filter_article
 )
 
 __all__ = [
@@ -34,7 +32,5 @@ __all__ = [
     'is_sports_game',
     'is_classified_ad',
     'is_weather_alert',
-    'should_filter_article',
-    'contains_policy_keywords',
-    'POLICY_WHITELIST'
+    'should_filter_article'
 ]

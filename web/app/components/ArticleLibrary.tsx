@@ -248,7 +248,6 @@ export default function ArticleLibrary({ entityColors, onArticleClick }: Article
           <h2 className="text-3xl font-bold text-[#0f1c3f]">Article Library</h2>
         </div>
         <div className="text-center py-16 bg-red-50 rounded-lg border-2 border-red-200">
-          <div className="text-4xl mb-4">⚠️</div>
           <h3 className="text-xl font-semibold text-red-800 mb-2">Error loading articles</h3>
           <p className="text-red-600">{error}</p>
         </div>
@@ -411,7 +410,6 @@ export default function ArticleLibrary({ entityColors, onArticleClick }: Article
       ) : (
         // Empty State
         <div className="text-center py-16 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
-          <div className="text-4xl mb-4">📰</div>
           <h3 className="text-xl font-semibold text-gray-800 mb-2">No articles found</h3>
           <p className="text-gray-600">Try adjusting your search or filters</p>
         </div>

@@ -3,7 +3,6 @@ Vermont Signal Content Filters
 Filters for Vermont-related content and low-value content removal
 
 Filters out:
-- New Hampshire articles (non-Vermont content)
 - Obituaries and death notices
 - Event calendars and listings
 - Very short articles (< 200 chars)
@@ -16,21 +15,6 @@ Filters out:
 
 import re
 from typing import List, Tuple
-
-# New Hampshire keywords to filter out non-Vermont articles
-NEW_HAMPSHIRE_KEYWORDS: List[str] = [
-    r'\bnew hampshire\b', r'\bnh\b', r'\bn\.h\.\b',
-
-    # Major NH cities
-    r'\bmanchester\b', r'\bnashua\b', r'\bconcord\b', r'\bdover\b',
-    r'\brochester\b', r'\bsalem\b', r'\bmerrimack\b', r'\bhudson\b',
-    r'\blondonderry\b', r'\bderry\b', r'\bkeene\b', r'\bportsmouth\b',
-    r'\blaconia\b', r'\bclaremont\b', r'\blebanon\b', r'\bfranconia\b',
-
-    # NH Regions
-    r'\bwhite mountains\b', r'\blakes region\b', r'\bmonadnock region\b',
-    r'\bseacoast\b.*\bnh\b', r'\bnh seacoast\b',
-]
 
 # Vermont-related keywords and patterns for filtering regional sources
 VERMONT_KEYWORDS: List[str] = [
@@ -55,133 +39,6 @@ VERMONT_KEYWORDS: List[str] = [
     r'\bmarlboro\b', r'\bmiddlebury\b', r'\bbenning?ton\b', r'\bst\. johnsbury\b',
     r'\bwhite river junction\b', r'\bspringfield\b', r'\blyndon\b',
 ]
-
-# Policy/Political keywords that should NEVER be filtered (WHITELIST)
-# These keywords indicate newsworthy political/policy content
-POLICY_WHITELIST: List[str] = [
-    # Legislative terms
-    r'\b(bill|legislation|statute|law|act|resolution|amendment)\b',
-    r'\b(legislature|senate|house|assembly|congress)\b',
-    r'\b(committee|subcommittee|caucus|commission)\b',
-
-    # Government actions
-    r'\b(policy|regulation|ordinance|rule|directive)\b',
-    r'\b(budget|appropriation|funding|grant|subsidy|allocation)\b',
-    r'\b(tax|taxation|levy|assessment)\b',
-    r'\b(revenue|spending|fiscal|financial) (forecast|projection|update|plan|report)\b',
-
-    # Government officials
-    r'\b(governor|lieutenant governor|attorney general)\b',
-    r'\b(mayor|selectboard|city council|town meeting)\b',
-    r'\b(senator|representative|delegate|assemblyman|assemblywoman)\b',
-    r'\b(secretary of state|treasurer|auditor)\b',
-
-    # Climate/environmental policy (NOT weather)
-    r'\bclimate (policy|action|plan|legislation|bill|law)\b',
-    r'\bcarbon (tax|pricing|market|trading|credit)\b',
-    r'\bemissions? (reduction|target|cap|trading|standard)\b',
-    r'\bgreenhouse gas (reduction|policy|regulation)\b',
-    r'\brenewable energy (policy|mandate|standard|requirement)\b',
-    r'\benvironmental (policy|regulation|protection|law)\b',
-
-    # Sports/stadium policy (NOT game coverage)
-    r'\b(stadium|arena|facility) (funding|budget|proposal|plan|bond|construction)\b',
-    r'\bsports (betting|gambling|wagering) (bill|legislation|law|legalization)\b',
-    r'\b(athletic|sports) (program|department) (budget|funding|grant)\b',
-    r'\bfacility (construction|development|building) (plan|proposal|project)\b',
-
-    # Political processes
-    r'\b(election|campaign|vote|referendum|ballot|initiative)\b',
-    r'\b(hearing|testimony|debate|public comment|forum)\b',
-    r'\b(veto|override|passed|approved|rejected|signed into law)\b',
-    r'\b(petition|lawsuit|litigation|court case|ruling|decision)\b',
-
-    # Policy domains
-    r'\b(education|healthcare|housing|transportation|infrastructure) (policy|reform|bill|plan|proposal)\b',
-    r'\b(zoning|land use|development|planning) (policy|reform|ordinance|regulation)\b',
-    r'\b(housing|education) (affordability|funding|access) (plan|proposal|bill|initiative)\b',
-]
-
-
-def contains_policy_keywords(text: str) -> bool:
-    """
-    Check if text contains policy-relevant keywords (WHITELIST)
-
-    Articles with policy keywords should generally NOT be filtered,
-    as they contain newsworthy political/government content.
-
-    Args:
-        text: Article title or summary to check
-
-    Returns:
-        True if contains policy keywords, False otherwise
-    """
-    if not text:
-        return False
-
-    text_lower = text.lower()
-    for pattern in POLICY_WHITELIST:
-        if re.search(pattern, text_lower):
-            return True
-
-    return False
-
-
-def is_new_hampshire_article(text: str) -> bool:
-    """
-    Check if text is about New Hampshire (non-Vermont content)
-
-    VT Digger and other regional sources sometimes publish NH articles.
-    This filters out content that is clearly about NH, not VT.
-
-    IMPROVED: Context-aware detection to avoid false positives from
-    middle initials (e.g., "Senator NH Thompson")
-
-    Args:
-        text: Article title or summary to check
-
-    Returns:
-        True if New Hampshire-related, False otherwise
-    """
-    if not text:
-        return False
-
-    text_lower = text.lower()
-
-    # Check for explicit "New Hampshire" mention
-    if re.search(r'\bnew hampshire\b', text_lower):
-        # Border story check: only filter if Vermont NOT mentioned
-        if not re.search(r'\bvermont\b|\bvt\b', text_lower):
-            return True
-
-    # Check for "NH" in clear New Hampshire contexts (NOT middle initials)
-    nh_context_patterns = [
-        r'\bn\.h\.\b',  # N.H. with periods (state abbreviation)
-        r'\bnh\s+(state|governor|legislature|senate|house|lawmakers|residents|voters)\b',
-        r'\b(in|from|near|across)\s+nh\b',  # Geographic context
-        r'\bnh\s+(seacoast|white mountains|lakes region)\b',  # NH regions
-    ]
-
-    for pattern in nh_context_patterns:
-        if re.search(pattern, text_lower):
-            if not re.search(r'\bvermont\b|\bvt\b', text_lower):
-                return True
-
-    # Check for NH cities (excluding common Vermont/NH border towns)
-    nh_city_patterns = [
-        r'\bmanchester\b', r'\bnashua\b', r'\bconcord\b', r'\bdover\b',
-        r'\brochester\b', r'\bsalem\b', r'\bmerrimack\b', r'\bhudson\b',
-        r'\blondonderry\b', r'\bderry\b', r'\bkeene\b', r'\bportsmouth\b',
-        r'\blaconia\b', r'\bclaremont\b', r'\blebanon\b',
-    ]
-
-    for pattern in nh_city_patterns:
-        if re.search(pattern, text_lower):
-            # Border story check
-            if not re.search(r'\bvermont\b|\bvt\b', text_lower):
-                return True
-
-    return False
 
 
 def is_vermont_related(text: str) -> bool:
@@ -312,6 +169,8 @@ def is_event_listing(title: str, summary: str = '') -> bool:
         r'\bevent listings?\b',
         r'\bcommunity events?\b',
         r'\barts? & entertainment calendar\b',
+        r'\bmust see,?\s*must do\b',  # "Magnificent 7: Must See, Must Do"
+        r'\bopens\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)',  # "opens Oct. 25"
     ]
 
     for pattern in event_patterns:
@@ -328,24 +187,31 @@ def is_event_listing(title: str, summary: str = '') -> bool:
     if re.search(happening_pattern, title_lower):
         return True
 
+    # Specific date patterns in title: "Oct. 24", "October 26", etc.
+    # Match patterns like "trunk or treat Oct. 24" or "dinner, Oct. 26"
+    specific_date_pattern = r',?\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\.?\s+\d{1,2}\b'
+    if re.search(specific_date_pattern, title_lower):
+        # Check for event-type words nearby
+        event_words = ['dinner', 'walk', 'treat', 'party', 'festival', 'fair', 'concert',
+                       'show', 'performance', 'celebration', 'gathering', 'conversation', 'meeting']
+        if any(word in title_lower for word in event_words):
+            return True
+
     return False
 
 
-def is_too_short(title: str, content: str, summary: str = '', min_words: int = 50) -> bool:
+def is_too_short(title: str, content: str, summary: str = '', min_length: int = 200) -> bool:
     """
     Check if article is too short to contain substantial news content
 
     Very short articles are often briefs, announcements, or fragments
     that don't provide enough context for fact extraction.
 
-    Uses word count instead of character count for more consistent and
-    reliable filtering across different writing styles.
-
     Args:
         title: Article title
         content: Article content/text
         summary: Article summary
-        min_words: Minimum word count (default 50)
+        min_length: Minimum character length (default 200)
 
     Returns:
         True if too short, False otherwise
@@ -353,15 +219,10 @@ def is_too_short(title: str, content: str, summary: str = '', min_words: int = 5
     # Use the longest available text
     text = content or summary or ''
 
-    # Strip HTML tags to get actual text content
-    # Simple regex approach: remove everything between < and >
-    text_without_html = re.sub(r'<[^>]+>', '', text)
+    # Count actual text length (excluding whitespace)
+    text_length = len(text.strip())
 
-    # Count words (split on whitespace)
-    words = text_without_html.split()
-    word_count = len(words)
-
-    return word_count < min_words
+    return text_length < min_length
 
 
 def is_review(title: str, summary: str = '') -> bool:
@@ -425,9 +286,6 @@ def is_sports_game(title: str, summary: str = '') -> bool:
 
     Sports games are filtered unless they involve policy/politics.
 
-    IMPROVED: Distinguishes between game coverage (filter) and
-    sports-related policy/funding stories (don't filter).
-
     Args:
         title: Article title
         summary: Article summary/description
@@ -438,32 +296,19 @@ def is_sports_game(title: str, summary: str = '') -> bool:
     if not title:
         return False
 
-    text = f"{title} {summary}"
-    text_lower = text.lower()
+    text_lower = f"{title} {summary}".lower()
     title_lower = title.lower()
-
-    # WHITELIST: Sports policy/funding should NOT be filtered
-    # Check policy keywords first to avoid false positives
-    if contains_policy_keywords(text):
-        # Additional check: explicit sports policy patterns
-        sports_policy_patterns = [
-            r'\b(stadium|arena|facility) (funding|budget|proposal|plan|bond|construction)\b',
-            r'\bsports (betting|gambling|wagering) (bill|legislation|law|legalization)\b',
-            r'\b(athletic|sports) (program|department) (budget|funding|grant|allocation)\b',
-            r'\b(coach|player) (contract|salary|compensation) (approved|negotiated)\b',
-            r'\b(team|franchise) (relocation|move|proposal|approval)\b',
-        ]
-
-        for pattern in sports_policy_patterns:
-            if re.search(pattern, text_lower):
-                return False  # This is sports POLICY, not game coverage
 
     # Game score patterns: "Team 3, Team 2" or "Team beats Team" or "Team vs Team"
     score_patterns = [
         r'\b\d+\s*-\s*\d+\b',  # 3-2, 21-14
         r'\b\w+\s+\d+,\s+\w+\s+\d+\b',  # Team 3, Team 2
         r'\bvs\.?\s+',  # vs or vs.
-        r'\b(beat|beats|win|wins|won|defeat|defeats|defeated|tops)\b',  # victory verbs
+        r'\bbeats?\b',  # beat, beats
+        r'\bdefeats?\b',  # defeat, defeats
+        r'\btops\b',  # tops (in sports context)
+        r'\bnips\b',  # "VUHS nips MUHS"
+        r'\bslips\s+pass(ed)?\b',  # "slips passed"
     ]
 
     # Only flag as sports if it contains sports keywords + score patterns
@@ -491,6 +336,24 @@ def is_sports_game(title: str, summary: str = '') -> bool:
     ]
 
     for pattern in recap_patterns:
+        if re.search(pattern, text_lower):
+            return True
+
+    # Sports-specific patterns that clearly indicate sports coverage
+    # "In girls' soccer", "boys' basketball", etc.
+    sports_coverage_pattern = r'\bin (girls?\'?|boys?\'?|mens?\'?|womens?\'?) (soccer|basketball|hockey|football|baseball|volleyball|lacrosse|tennis|track)\b'
+    if re.search(sports_coverage_pattern, title_lower):
+        return True
+
+    # Fishing/hunting/recreation records and achievements
+    recreation_patterns = [
+        r'\breel in\b.*\b(record|bass|fish)',
+        r'\b(bass|trout|fishing|angling)\s+(record|tournament|competition)',
+        r'\bhunting\s+season\b',
+        r'\b(youth|unofficial)\s+angler\b',
+    ]
+
+    for pattern in recreation_patterns:
         if re.search(pattern, text_lower):
             return True
 
@@ -553,10 +416,6 @@ def is_weather_alert(title: str, summary: str = '') -> bool:
 
     Weather alerts don't contain policy/political news.
 
-    IMPROVED: Distinguishes between weather forecasts (filter) and
-    climate policy articles (don't filter). Climate policy is newsworthy
-    and should be extracted.
-
     Args:
         title: Article title
         summary: Article summary/description
@@ -567,54 +426,173 @@ def is_weather_alert(title: str, summary: str = '') -> bool:
     if not title:
         return False
 
-    text = f"{title} {summary}"
-    text_lower = text.lower()
+    text_lower = f"{title} {summary}".lower()
     title_lower = title.lower()
 
-    # WHITELIST: Climate/environmental policy should NOT be filtered
-    # Check policy keywords first to avoid false positives
-    if contains_policy_keywords(text):
-        # Additional check: explicit climate policy patterns
-        climate_policy_patterns = [
-            r'\bclimate (policy|action|plan|legislation|bill|law)\b',
-            r'\bcarbon (tax|pricing|market|trading|credit)\b',
-            r'\bemissions? (reduction|target|cap|trading|standard)\b',
-            r'\brenewable energy (policy|mandate|standard)\b',
-            r'\benvironmental (policy|regulation|protection|law)\b',
-        ]
-
-        for pattern in climate_policy_patterns:
-            if re.search(pattern, text_lower):
-                return False  # This is climate POLICY, not weather
-
-    # Weather alert patterns (actual forecasts)
+    # Weather alert patterns
     weather_patterns = [
         r'\bweather forecast\b',
         r'\bforecast:',
-        r'\bweather (alert|warning|outlook|update)\b',
+        r'\bweather alert\b',
+        r'\bweather warning\b',
         r'\bstorm watch\b',
-        r'\bwinter storm (watch|warning|advisory)\b',
-        r'\bflood (watch|warning|advisory)\b',
-        r'\bsevere weather (watch|warning)\b',
+        r'\bwinter storm\b',
+        r'\bflood watch\b',
+        r'\bsevere weather\b',
         r'\btoday\'?s weather\b',
-        r'\b\d+-day (forecast|outlook|weather)\b',  # 7-day forecast, 5-day outlook
+        r'\bweather update\b',
+        r'\b7-day forecast\b',
         r'\bextended forecast\b',
-        r'\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\'?s weather\b',
     ]
 
     for pattern in weather_patterns:
         if re.search(pattern, text_lower):
             return True
 
-    # Temperature patterns in title: "High of 75°" or "Temps in the 60s" or "High temperatures expected"
-    # (These are clearly weather forecasts, not policy)
-    temp_patterns = [
-        r'\b(high|low|temp|temperature)s?\s+(of|in|to reach)\s+\d+°?',  # "High of 75", "temps in the 60s"
-        r'\b(high|low) (temp|temperature)s?\s+(expected|forecast)',  # "High temperatures expected"
+    # Temperature patterns in title: "High of 75°" or "Temps in the 60s"
+    temp_pattern = r'(high|low|temp|temperature)s?\s+(of|in)\s+\d+°?'
+    if re.search(temp_pattern, title_lower):
+        return True
+
+    return False
+
+
+def is_new_hampshire_article(title: str, summary: str = '') -> bool:
+    """
+    Check if article is about New Hampshire (not Vermont)
+
+    Valley News and other regional sources cover both VT and NH,
+    so we need to filter out NH-only stories.
+
+    Args:
+        title: Article title
+        summary: Article summary/description
+
+    Returns:
+        True if New Hampshire article, False otherwise
+    """
+    if not title:
+        return False
+
+    text_lower = f"{title} {summary}".lower()
+    title_lower = title.lower()
+
+    # Explicit NH mentions in title (strong signal)
+    nh_explicit = [
+        r'\bnh\b',
+        r'\bnew hampshire\b',
+        r'\bn\.h\.\b',
     ]
 
-    for pattern in temp_patterns:
+    for pattern in nh_explicit:
         if re.search(pattern, title_lower):
+            return True
+
+    # NH cities and towns (only filter if in title without VT context)
+    nh_cities = [
+        'claremont', 'lebanon', 'hanover', 'concord', 'manchester',
+        'nashua', 'portsmouth', 'keene', 'laconia', 'berlin',
+        'plymouth', 'littleton', 'newport nh', 'charlestown nh',
+    ]
+
+    # Check if NH city is mentioned in title
+    title_has_nh_city = any(city in title_lower for city in nh_cities)
+
+    # Check if Vermont is also mentioned (if so, probably relevant)
+    vt_mentioned = bool(re.search(r'\b(vermont|vt|burlington|montpelier)\b', text_lower))
+
+    # Filter out if NH city in title but no VT context
+    if title_has_nh_city and not vt_mentioned:
+        return True
+
+    return False
+
+
+def is_opinion_editorial(title: str, summary: str = '') -> bool:
+    """
+    Check if article is an opinion piece or editorial
+
+    Opinion pieces are often less fact-based than news reporting.
+
+    Args:
+        title: Article title
+        summary: Article summary/description
+
+    Returns:
+        True if opinion/editorial, False otherwise
+    """
+    if not title:
+        return False
+
+    text_lower = f"{title} {summary}".lower()
+    title_lower = title.lower()
+
+    # Opinion/editorial indicators
+    opinion_patterns = [
+        r'\bopinion:',
+        r'\beditorial:',
+        r'\bcolumn:',
+        r'\bcommentary:',
+        r'\bletter to the editor\b',
+        r'\bletters to the editor\b',
+        r'\bguest column\b',
+        r'\bguest commentary\b',
+        r'\bop-ed\b',
+        r'\bmy view\b',
+        r'\bpoint of view\b',
+    ]
+
+    for pattern in opinion_patterns:
+        if re.search(pattern, text_lower):
+            return True
+
+    # Religious/philosophical opinion pieces
+    religious_opinion = [
+        r'\btime to reclaim\b.*\bpractice\b.*\bgod\b',
+        r'\bpeople are the sovereign power\b',
+        r'\bcapturing the.*cruelty\b',
+    ]
+
+    for pattern in religious_opinion:
+        if re.search(pattern, title_lower):
+            return True
+
+    return False
+
+
+def is_human_interest_fluff(title: str, summary: str = '') -> bool:
+    """
+    Check if article is human interest/lifestyle fluff without news value
+
+    These are feel-good stories, personal profiles, or lifestyle pieces
+    that don't contain policy/political/business news.
+
+    Args:
+        title: Article title
+        summary: Article summary/description
+
+    Returns:
+        True if human interest fluff, False otherwise
+    """
+    if not title:
+        return False
+
+    text_lower = f"{title} {summary}".lower()
+    title_lower = title.lower()
+
+    # Human interest patterns
+    fluff_patterns = [
+        r'\bdream comes true\b',
+        r'\bfollowing (his|her|their) dream\b',
+        r'\bfriends enjoy\b',
+        r'\bswim and run\b',
+        r'\benjo(y|ying) .*\b(along|in|at)\b',
+        r'\banswering the call\b',
+        r'\b(heartwarming|inspiring|uplifting) (story|tale)\b',
+    ]
+
+    for pattern in fluff_patterns:
+        if re.search(pattern, text_lower):
             return True
 
     return False
@@ -624,7 +602,7 @@ def should_filter_article(
     title: str,
     content: str = '',
     summary: str = '',
-    min_words: int = 50
+    min_length: int = 200
 ) -> Tuple[bool, str]:
     """
     Master filter function - checks all low-value content filters
@@ -633,7 +611,7 @@ def should_filter_article(
         title: Article title
         content: Article content/text
         summary: Article summary
-        min_words: Minimum word count for articles (default 50)
+        min_length: Minimum character length for articles
 
     Returns:
         Tuple of (should_filter: bool, reason: str)
@@ -644,9 +622,7 @@ def should_filter_article(
         return True, "missing_title"
 
     # Check each filter in order
-    # New Hampshire filter first (geography-based)
-    text_to_check = f"{title} {summary}"
-    if is_new_hampshire_article(text_to_check):
+    if is_new_hampshire_article(title, summary):
         return True, "new_hampshire_article"
 
     if is_obituary(title, summary):
@@ -667,7 +643,13 @@ def should_filter_article(
     if is_weather_alert(title, summary):
         return True, "weather_alert"
 
-    if is_too_short(title, content, summary, min_words):
+    if is_opinion_editorial(title, summary):
+        return True, "opinion_editorial"
+
+    if is_human_interest_fluff(title, summary):
+        return True, "human_interest_fluff"
+
+    if is_too_short(title, content, summary, min_length):
         return True, "too_short"
 
     return False, "passed"

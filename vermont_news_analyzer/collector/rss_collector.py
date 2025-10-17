@@ -203,12 +203,15 @@ class RSSCollector:
             articles = []
             vt_filtered_count = 0
             filter_stats = {
+                'new_hampshire_article': 0,
                 'obituary': 0,
                 'event_listing': 0,
                 'review': 0,
                 'sports_game': 0,
                 'classified_ad': 0,
                 'weather_alert': 0,
+                'opinion_editorial': 0,
+                'human_interest_fluff': 0,
                 'too_short': 0
             }
 

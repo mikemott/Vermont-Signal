@@ -19,11 +19,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from vermont_news_analyzer.modules.database import VermontSignalDatabase
-from vermont_news_analyzer.config import CostConfig
 
-# Budget thresholds from centralized config
-DAILY_BUDGET = CostConfig.DAILY_BUDGET_CAP
-MONTHLY_BUDGET = CostConfig.MONTHLY_BUDGET_CAP
+# Budget thresholds (configurable via environment variables)
+DAILY_BUDGET = float(os.getenv("DAILY_BUDGET_CAP", "5.00"))
+MONTHLY_BUDGET = float(os.getenv("MONTHLY_BUDGET_CAP", "25.00"))
 
 # Alert thresholds
 WARNING_THRESHOLD = 0.80  # 80%
@@ -32,33 +31,32 @@ CRITICAL_THRESHOLD = 0.90  # 90%
 
 def get_costs(db):
     """Get daily and monthly costs from database"""
-    with db.get_connection() as conn:
-        with conn.cursor() as cur:
-            # Today's cost
-            cur.execute("""
-                SELECT COALESCE(SUM(cost), 0) as total
-                FROM api_costs
-                WHERE DATE(timestamp) = CURRENT_DATE
-            """)
-            daily_cost = float(cur.fetchone()[0])
+    with db.conn.cursor() as cur:
+        # Today's cost
+        cur.execute("""
+            SELECT COALESCE(SUM(cost), 0) as total
+            FROM api_costs
+            WHERE DATE(timestamp) = CURRENT_DATE
+        """)
+        daily_cost = float(cur.fetchone()[0])
 
-            # This month's cost
-            cur.execute("""
-                SELECT COALESCE(SUM(cost), 0) as total
-                FROM api_costs
-                WHERE DATE_TRUNC('month', timestamp) = DATE_TRUNC('month', CURRENT_DATE)
-            """)
-            monthly_cost = float(cur.fetchone()[0])
+        # This month's cost
+        cur.execute("""
+            SELECT COALESCE(SUM(cost), 0) as total
+            FROM api_costs
+            WHERE DATE_TRUNC('month', timestamp) = DATE_TRUNC('month', CURRENT_DATE)
+        """)
+        monthly_cost = float(cur.fetchone()[0])
 
-            # Get cost by provider (for details)
-            cur.execute("""
-                SELECT api_provider, SUM(cost) as total
-                FROM api_costs
-                WHERE DATE_TRUNC('month', timestamp) = DATE_TRUNC('month', CURRENT_DATE)
-                GROUP BY api_provider
-                ORDER BY total DESC
-            """)
-            provider_costs = {row[0]: float(row[1]) for row in cur.fetchall()}
+        # Get cost by provider (for details)
+        cur.execute("""
+            SELECT api_provider, SUM(cost) as total
+            FROM api_costs
+            WHERE DATE_TRUNC('month', timestamp) = DATE_TRUNC('month', CURRENT_DATE)
+            GROUP BY api_provider
+            ORDER BY total DESC
+        """)
+        provider_costs = {row[0]: float(row[1]) for row in cur.fetchall()}
 
     return daily_cost, monthly_cost, provider_costs
 

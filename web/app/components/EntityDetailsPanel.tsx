@@ -102,7 +102,7 @@ export default function EntityDetailsPanel({ entity, onClose, entityColors }: En
           {/* Statistics */}
           <section>
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-              📊 Statistics
+              Statistics
             </h3>
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-gray-50 rounded p-3">
@@ -166,7 +166,7 @@ export default function EntityDetailsPanel({ entity, onClose, entityColors }: En
           {/* Connections */}
           <section>
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-              🔗 Connections ({entity.connections.length})
+              Connections ({entity.connections.length})
             </h3>
             <div className="space-y-2">
               {entity.connections.slice(0, 5).map((conn, idx) => (
@@ -197,7 +197,7 @@ export default function EntityDetailsPanel({ entity, onClose, entityColors }: En
           {/* Extracted Facts */}
           <section>
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-              📝 Extracted Facts
+              Extracted Facts
             </h3>
             <div className="space-y-3">
               {entity.facts.map((fact, idx) => (
@@ -219,7 +219,7 @@ export default function EntityDetailsPanel({ entity, onClose, entityColors }: En
           {entity.wikidata && (
             <section>
               <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                🌐 Wikidata
+                Wikidata
               </h3>
               <div className="bg-gray-50 rounded p-4 space-y-2">
                 {entity.wikidata.birth_date && (
@@ -265,7 +265,7 @@ export default function EntityDetailsPanel({ entity, onClose, entityColors }: En
           {/* Recent Articles */}
           <section>
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-              📰 Recent Mentions
+              Recent Mentions
             </h3>
             <div className="space-y-2">
               {entity.recent_articles.map((article, idx) => (

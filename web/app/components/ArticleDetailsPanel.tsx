@@ -17,6 +17,7 @@ export default function ArticleDetailsPanel({ article, onClose, entityColors, on
   const [networkData, setNetworkData] = useState<api.EntityNetwork | null>(null);
   const [networkLoading, setNetworkLoading] = useState(false);
   const [networkError, setNetworkError] = useState<string | null>(null);
+  const [showAllEntities, setShowAllEntities] = useState(false);
 
   // Fetch entity network when article changes
   useEffect(() => {
@@ -135,7 +136,7 @@ export default function ArticleDetailsPanel({ article, onClose, entityColors, on
           {/* Summary */}
           <section>
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-              📄 AI-Generated Summary
+              AI-Generated Summary
             </h3>
             <div className="bg-gray-50 rounded-lg p-4">
               <p className="text-gray-800 leading-relaxed">
@@ -146,9 +147,23 @@ export default function ArticleDetailsPanel({ article, onClose, entityColors, on
 
           {/* Entity Network Visualization */}
           <section>
-            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-              🔗 Entity Network
-            </h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
+                Entity Network
+              </h3>
+              {networkData && networkData.total_entities > 5 && (
+                <button
+                  onClick={() => setShowAllEntities(!showAllEntities)}
+                  className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-all ${
+                    showAllEntities
+                      ? 'bg-[#0f1c3f] text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {showAllEntities ? 'Show Top 5' : `Show All (${networkData.total_entities})`}
+                </button>
+              )}
+            </div>
             {networkLoading ? (
               <div className="bg-gray-50 rounded-lg p-8 text-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#0f1c3f] mx-auto"></div>
@@ -159,36 +174,61 @@ export default function ArticleDetailsPanel({ article, onClose, entityColors, on
                 {networkError}
               </div>
             ) : networkData ? (
-              <div className="space-y-3">
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs">
-                  <strong>Interactive:</strong> This network shows all {networkData.total_entities} entities from this article.
-                  Click any node to explore its broader connections across all articles.
-                </div>
-                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                  <EntityNetworkD3
-                    entities={networkData.nodes.map(n => ({ id: n.id, label: n.label, type: n.type }))}
-                    connections={networkData.connections.map(c => ({
-                      source: c.source,
-                      target: c.target,
-                      label: c.label || c.relationship_type || 'related'
-                    }))}
-                    entityColors={entityColors}
-                    width={600}
-                    height={400}
-                    onEntityClick={onEntityClick}
-                  />
-                </div>
-                <div className="text-xs text-gray-500 text-center">
-                  {networkData.total_entities} entities • {networkData.total_relationships} connections
-                </div>
-              </div>
+              (() => {
+                // Filter to top 5 entities by weight/importance unless showing all
+                const sortedNodes = [...networkData.nodes].sort((a, b) => (b.weight || 0) - (a.weight || 0));
+                const displayNodes = showAllEntities ? networkData.nodes : sortedNodes.slice(0, 5);
+                const displayNodeIds = new Set(displayNodes.map(n => n.id));
+
+                // Only include connections between displayed nodes
+                const displayConnections = networkData.connections.filter(c =>
+                  displayNodeIds.has(typeof c.source === 'string' ? c.source : c.source.id) &&
+                  displayNodeIds.has(typeof c.target === 'string' ? c.target : c.target.id)
+                );
+
+                return (
+                  <div className="space-y-3">
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs">
+                      <strong>Interactive:</strong> {showAllEntities
+                        ? `Viewing all ${networkData.total_entities} entities from this article.`
+                        : `Viewing top 5 most important entities. ${networkData.total_entities > 5 ? 'Click "Show All" to see more.' : ''}`
+                      } Click any node to explore its broader connections across all articles.
+                    </div>
+                    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                      <EntityNetworkD3
+                        entities={displayNodes.map(n => ({
+                          id: n.id,
+                          label: n.label,
+                          type: n.type,
+                          weight: n.weight
+                        }))}
+                        connections={displayConnections.map(c => ({
+                          source: c.source,
+                          target: c.target,
+                          label: c.label || c.relationship_type || 'related'
+                        }))}
+                        entityColors={entityColors}
+                        width={600}
+                        height={400}
+                        onEntityClick={onEntityClick}
+                      />
+                    </div>
+                    <div className="text-xs text-gray-500 text-center">
+                      {displayNodes.length} {displayNodes.length === 1 ? 'entity' : 'entities'} • {displayConnections.length} {displayConnections.length === 1 ? 'connection' : 'connections'}
+                      {!showAllEntities && networkData.total_entities > 5 && (
+                        <span className="text-gray-400"> (of {networkData.total_entities} total)</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()
             ) : null}
           </section>
 
           {/* AI Analysis Stats */}
           <section>
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-              🤖 Analysis Metadata
+              Analysis Metadata
             </h3>
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-gray-50 rounded-lg p-3">
@@ -237,7 +277,7 @@ export default function ArticleDetailsPanel({ article, onClose, entityColors, on
           {/* Extracted Entities by Type */}
           <section>
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-              🏷️ Extracted Entities ({article.extracted_facts.length})
+              Extracted Entities ({article.extracted_facts.length})
             </h3>
             <div className="space-y-4">
               {Object.entries(entitiesByType).map(([type, entities]) => (

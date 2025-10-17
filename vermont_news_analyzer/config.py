@@ -94,9 +94,7 @@ class PipelineConfig:
         "GPE",  # Geopolitical entity
         "DATE",
         "PRODUCT",
-        "EVENT",
-        "LAW",  # Laws, bills, legislation
-        "POLICY"  # Policies, regulations, government programs
+        "EVENT"
     ]
 
 
@@ -142,112 +140,6 @@ class WikidataConfig:
 
     # Vermont-specific entity filtering
     VERMONT_GEONAME_ID: str = "5242283"  # GeoNames ID for Vermont
-
-
-# ============================================================================
-# COST CONFIGURATION
-# ============================================================================
-
-class CostConfig:
-    """
-    LLM API cost configuration for multi-model pipeline
-
-    Centralized pricing for Claude, Gemini, and GPT models.
-    All costs are per 1 million tokens (input and output).
-
-    Last updated: October 2025
-    """
-
-    # Claude Sonnet 4.5 pricing (per 1M tokens)
-    CLAUDE_INPUT_COST: float = 3.00      # $3.00 per 1M input tokens
-    CLAUDE_OUTPUT_COST: float = 15.00    # $15.00 per 1M output tokens
-
-    # Gemini 2.5 Flash pricing (per 1M tokens)
-    GEMINI_INPUT_COST: float = 0.075     # $0.075 per 1M input tokens
-    GEMINI_OUTPUT_COST: float = 0.30     # $0.30 per 1M output tokens
-
-    # GPT-4o-mini pricing (per 1M tokens)
-    GPT_INPUT_COST: float = 0.15         # $0.15 per 1M input tokens
-    GPT_OUTPUT_COST: float = 0.60        # $0.60 per 1M output tokens
-
-    # Budget caps (can be overridden by environment variables)
-    MONTHLY_BUDGET_CAP: float = float(os.getenv("MONTHLY_BUDGET_CAP", "50.00"))
-    DAILY_BUDGET_CAP: float = float(os.getenv("DAILY_BUDGET_CAP", "10.00"))
-
-    # Arbitration frequency estimate (GPT is only used for conflict resolution)
-    ARBITRATION_FREQUENCY: float = 0.30  # ~30% of articles need arbitration
-
-    @classmethod
-    def calculate_article_cost(
-        cls,
-        input_tokens: int,
-        output_tokens: int,
-        include_arbitration: bool = True
-    ) -> dict:
-        """
-        Calculate total cost for processing one article through multi-model pipeline
-
-        Args:
-            input_tokens: Number of input tokens
-            output_tokens: Number of output tokens per model
-            include_arbitration: Whether to include GPT arbitration cost estimate
-
-        Returns:
-            dict: Breakdown of costs per model and total
-        """
-        # Claude cost
-        claude_cost = (
-            (input_tokens * cls.CLAUDE_INPUT_COST / 1_000_000) +
-            (output_tokens * cls.CLAUDE_OUTPUT_COST / 1_000_000)
-        )
-
-        # Gemini cost
-        gemini_cost = (
-            (input_tokens * cls.GEMINI_INPUT_COST / 1_000_000) +
-            (output_tokens * cls.GEMINI_OUTPUT_COST / 1_000_000)
-        )
-
-        # GPT arbitration cost (estimated based on frequency)
-        gpt_cost = 0.0
-        if include_arbitration:
-            gpt_cost = (
-                (input_tokens * cls.GPT_INPUT_COST / 1_000_000) +
-                (output_tokens * cls.GPT_OUTPUT_COST / 1_000_000)
-            ) * cls.ARBITRATION_FREQUENCY
-
-        return {
-            'claude': claude_cost,
-            'gemini': gemini_cost,
-            'gpt': gpt_cost,
-            'total': claude_cost + gemini_cost + gpt_cost
-        }
-
-    @classmethod
-    def get_model_costs(cls, provider: str) -> dict:
-        """
-        Get input/output costs for a specific provider
-
-        Args:
-            provider: 'anthropic', 'google', or 'openai'
-
-        Returns:
-            dict: {'input': float, 'output': float} costs per 1M tokens
-        """
-        cost_map = {
-            'anthropic': {
-                'input': cls.CLAUDE_INPUT_COST,
-                'output': cls.CLAUDE_OUTPUT_COST
-            },
-            'google': {
-                'input': cls.GEMINI_INPUT_COST,
-                'output': cls.GEMINI_OUTPUT_COST
-            },
-            'openai': {
-                'input': cls.GPT_INPUT_COST,
-                'output': cls.GPT_OUTPUT_COST
-            }
-        }
-        return cost_map.get(provider, {'input': 0.0, 'output': 0.0})
 
 
 # ============================================================================
@@ -303,7 +195,7 @@ Generate a JSON response with the following structure:
   "extracted_facts": [
     {{
       "entity": "entity name",
-      "type": "PERSON|ORGANIZATION|LOCATION|DATE|PRODUCT|EVENT|LAW|POLICY",
+      "type": "PERSON|ORGANIZATION|LOCATION|DATE|PRODUCT|EVENT",
       "confidence": 0.0-1.0,
       "event_description": "who did what, when, where, why",
       "note": "optional note about uncertainty or verification status"
@@ -311,14 +203,10 @@ Generate a JSON response with the following structure:
   ]
 }}
 
-Entity Type Guidelines:
-- LAW: Bills, legislation, statutes, legal acts (e.g., "Act 250", "H.B. 123", "Vermont Clean Water Act")
-- POLICY: Government policies, regulations, programs, initiatives (e.g., "Universal Pre-K", "Climate Action Plan")
-
 Rules:
 1. Prioritize factual fidelity - do not hallucinate
 2. If uncertain about a fact, set confidence < 0.4 and add a note
-3. Extract ALL named entities and events, including laws and policies
+3. Extract ALL named entities and events
 4. Link entities to events with clear descriptions
 5. Return ONLY valid JSON, no additional text"""
 
@@ -333,7 +221,7 @@ Generate a JSON response with:
   "extracted_facts": [
     {{
       "entity": "entity name",
-      "type": "PERSON|ORGANIZATION|LOCATION|DATE|PRODUCT|EVENT|LAW|POLICY",
+      "type": "PERSON|ORGANIZATION|LOCATION|DATE|PRODUCT|EVENT",
       "confidence": 0.0-1.0,
       "event_description": "detailed causal chain - who did what, why it happened, what resulted",
       "note": "optional contextual note"
@@ -341,16 +229,11 @@ Generate a JSON response with:
   ]
 }}
 
-Entity Type Guidelines:
-- LAW: Bills, legislation, statutes, legal acts (e.g., "Act 250", "H.B. 123", "Vermont Clean Water Act")
-- POLICY: Government policies, regulations, programs, initiatives (e.g., "Universal Pre-K", "Climate Action Plan")
-
 Focus on:
 - Causal relationships between events
 - Temporal sequences
 - Motivations and outcomes
 - Relationships between entities
-- Impact of laws and policies
 
 Return ONLY valid JSON."""
 

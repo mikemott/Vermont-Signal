@@ -7,6 +7,7 @@ interface Node extends d3.SimulationNodeDatum {
   id: string;
   label: string;
   type: string;
+  weight?: number;
 }
 
 interface Link extends d3.SimulationLinkDatum<Node> {
@@ -16,7 +17,7 @@ interface Link extends d3.SimulationLinkDatum<Node> {
 }
 
 interface EntityNetworkProps {
-  entities: Array<{ id: string; label: string; type: string }>;
+  entities: Array<{ id: string; label: string; type: string; weight?: number }>;
   connections: Array<{ source: string; target: string; label: string }>;
   entityColors: Record<string, string>;
   width?: number;
@@ -51,7 +52,7 @@ export default function EntityNetworkD3({
   useEffect(() => {
     if (!svgRef.current || !containerRef.current) return;
     if (!entities || entities.length === 0) return;
-    if (!connections) return;
+    if (!connections || !Array.isArray(connections)) return;
     if (typeof window === 'undefined') return;
 
     // Clear previous content
@@ -61,8 +62,20 @@ export default function EntityNetworkD3({
     const containerWidth = containerRef.current.clientWidth;
     const svgWidth = containerWidth;
     const svgHeight = isMobile ? 400 : 600;
-    const nodeRadius = isMobile ? 60 : 50;
-    const nodeHoverRadius = isMobile ? 70 : 55;
+    const baseNodeRadius = isMobile ? 50 : 40;
+    const maxNodeRadius = isMobile ? 70 : 60;
+
+    // Calculate node radius based on weight for visual hierarchy
+    const weights = entities.map(e => e.weight || 1);
+    const minWeight = Math.min(...weights);
+    const maxWeight = Math.max(...weights);
+    const weightRange = maxWeight - minWeight || 1; // Avoid division by zero
+
+    const getNodeRadius = (weight: number = 1) => {
+      // Scale radius from baseNodeRadius to maxNodeRadius based on weight
+      const normalizedWeight = (weight - minWeight) / weightRange;
+      return baseNodeRadius + (normalizedWeight * (maxNodeRadius - baseNodeRadius));
+    };
 
     // Create SVG
     const svg = d3.select(svgRef.current)
@@ -75,18 +88,21 @@ export default function EntityNetworkD3({
       id: e.id,
       label: e.label,
       type: e.type,
+      weight: e.weight || 1,
     }));
 
-    const links: Link[] = connections.map(c => ({
-      source: c.source,
-      target: c.target,
-      label: c.label,
-    }));
+    // Filter out invalid connections (missing source/target)
+    const links: Link[] = connections
+      .filter(c => c.source && c.target)
+      .map(c => ({
+        source: c.source,
+        target: c.target,
+        label: c.label || 'related',
+      }));
 
     // Create force simulation with responsive parameters
     const linkDistance = isMobile ? 120 : 180;
     const chargeStrength = isMobile ? -600 : -1000;
-    const collisionRadius = isMobile ? 80 : 70;
 
     const simulation = d3.forceSimulation(nodes)
       .force('link', d3.forceLink<Node, Link>(links)
@@ -94,7 +110,7 @@ export default function EntityNetworkD3({
         .distance(linkDistance))
       .force('charge', d3.forceManyBody().strength(chargeStrength))
       .force('center', d3.forceCenter(svgWidth / 2, svgHeight / 2))
-      .force('collision', d3.forceCollide().radius(collisionRadius));
+      .force('collision', d3.forceCollide().radius(d => getNodeRadius(d.weight) + 10));
 
     // Create container for zoom
     const g = svg.append('g');
@@ -155,9 +171,9 @@ export default function EntityNetworkD3({
           .on('end', dragended) as any
       );
 
-    // Add circles to nodes with tinted fill
+    // Add circles to nodes with tinted fill and variable size based on weight
     node.append('circle')
-      .attr('r', nodeRadius)
+      .attr('r', d => getNodeRadius(d.weight))
       .attr('fill', d => {
         const color = entityColors[d.type] || '#6b7280';
         // Convert hex to rgba with transparency
@@ -233,18 +249,20 @@ export default function EntityNetworkD3({
     // Hover and click effects
     node
       .style('cursor', 'pointer')
-      .on('mouseenter touchstart', function() {
+      .on('mouseenter touchstart', function(event, d) {
+        const currentRadius = getNodeRadius(d.weight);
         d3.select(this).select('circle')
           .transition()
           .duration(200)
-          .attr('r', nodeHoverRadius)
+          .attr('r', currentRadius + 10)
           .attr('stroke-width', isMobile ? 5 : 4);
       })
-      .on('mouseleave touchend', function() {
+      .on('mouseleave touchend', function(event, d) {
+        const currentRadius = getNodeRadius(d.weight);
         d3.select(this).select('circle')
           .transition()
           .duration(200)
-          .attr('r', nodeRadius)
+          .attr('r', currentRadius)
           .attr('stroke-width', isMobile ? 4 : 3);
       })
       .on('click', function(event, d) {
