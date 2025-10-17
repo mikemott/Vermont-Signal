@@ -60,7 +60,7 @@ export default function ArticleLibrary({ entityColors, onArticleClick }: Article
   const [selectedEntityType, setSelectedEntityType] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'latest' | 'oldest' | 'most_entities'>('latest');
   const [currentPage, setCurrentPage] = useState(1);
-  const articlesPerPage = 9;
+  const articlesPerPage = 25;
 
   // Fetch articles from API
   useEffect(() => {
@@ -389,19 +389,74 @@ export default function ArticleLibrary({ entityColors, onArticleClick }: Article
               </button>
 
               <div className="flex items-center gap-1">
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`w-10 h-10 rounded-lg text-sm font-medium transition-colors ${
-                      currentPage === page
-                        ? 'bg-[#0f1c3f] text-white'
-                        : 'border border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    {page}
-                  </button>
-                ))}
+                {/* Smart pagination: show first, last, current, and nearby pages */}
+                {(() => {
+                  const pages: (number | string)[] = [];
+                  const maxVisible = 7; // Show max 7 page buttons
+
+                  if (totalPages <= maxVisible) {
+                    // Show all pages if total is small
+                    for (let i = 1; i <= totalPages; i++) {
+                      pages.push(i);
+                    }
+                  } else {
+                    // Always show first page
+                    pages.push(1);
+
+                    // Calculate range around current page
+                    let start = Math.max(2, currentPage - 1);
+                    let end = Math.min(totalPages - 1, currentPage + 1);
+
+                    // Adjust range if at edges
+                    if (currentPage <= 3) {
+                      end = Math.min(totalPages - 1, 5);
+                    } else if (currentPage >= totalPages - 2) {
+                      start = Math.max(2, totalPages - 4);
+                    }
+
+                    // Add ellipsis if gap before range
+                    if (start > 2) {
+                      pages.push('...');
+                    }
+
+                    // Add middle range
+                    for (let i = start; i <= end; i++) {
+                      pages.push(i);
+                    }
+
+                    // Add ellipsis if gap after range
+                    if (end < totalPages - 1) {
+                      pages.push('...');
+                    }
+
+                    // Always show last page
+                    pages.push(totalPages);
+                  }
+
+                  return pages.map((page, idx) => {
+                    if (page === '...') {
+                      return (
+                        <span key={`ellipsis-${idx}`} className="px-2 text-gray-400">
+                          ...
+                        </span>
+                      );
+                    }
+
+                    return (
+                      <button
+                        key={page}
+                        onClick={() => setCurrentPage(page as number)}
+                        className={`w-10 h-10 rounded-lg text-sm font-medium transition-colors ${
+                          currentPage === page
+                            ? 'bg-[#0f1c3f] text-white'
+                            : 'border border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    );
+                  });
+                })()}
               </div>
 
               <button
