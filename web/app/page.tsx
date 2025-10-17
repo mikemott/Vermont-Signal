@@ -471,8 +471,7 @@ function TopicsTrends() {
       } catch (err) {
         console.error('Failed to fetch topics:', err);
         setError(err instanceof Error ? err.message : 'Failed to load topics');
-        // Use mock data for demo
-        setTopics(generateMockTopics());
+        setTopics([]);
       } finally {
         setLoading(false);
       }
@@ -954,38 +953,6 @@ function createMiniSparkline(topic: api.Topic) {
   }
 
   return path;
-}
-
-
-// Mock data generator
-function generateMockTopics(): api.Topic[] {
-  const mockKeywordSets = [
-    ['Housing', 'Affordability', 'Crisis', 'Rental', 'Burlington', 'Development', 'Zoning'],
-    ['Climate', 'Vermont', 'Energy', 'Renewable', 'Environment', 'Carbon', 'Policy'],
-    ['Education', 'Schools', 'Students', 'Teachers', 'Funding', 'Legislature'],
-    ['Healthcare', 'Hospital', 'Access', 'Rural', 'Insurance', 'Costs'],
-    ['Legislature', 'Budget', 'Tax', 'Revenue', 'Session', 'Bill', 'Vote'],
-    ['Tourism', 'Ski', 'Fall', 'Foliage', 'Economy', 'Small Business'],
-  ];
-
-  return mockKeywordSets.map((keywords, index) => ({
-    topic_id: index,
-    label: `Topic ${index}`,
-    keywords,
-    article_count: Math.floor(Math.random() * 40) + 5,
-    computed_at: new Date().toISOString(),
-    date_range: {
-      first: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-      latest: new Date().toISOString(),
-    },
-    trend: {
-      direction: ['rising', 'stable', 'falling'][Math.floor(Math.random() * 3)] as 'rising' | 'stable' | 'falling',
-      symbol: ['↑', '→', '↓'][Math.floor(Math.random() * 3)],
-      velocity: Math.floor(Math.random() * 60) - 20,
-      articles_last_week: Math.floor(Math.random() * 15) + 5,
-      articles_prev_week: Math.floor(Math.random() * 15) + 5,
-    },
-  }));
 }
 
 function CompareModels() {
