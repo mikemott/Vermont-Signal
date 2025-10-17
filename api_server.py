@@ -333,12 +333,18 @@ def get_article_detail(request: Request, article_id: int):
 def get_entity_network(
     request: Request,
     limit: int = Query(100, le=500),
-    days: Optional[int] = 30
+    days: Optional[int] = 30,
+    min_mentions: int = Query(3, ge=1, le=10, description="Minimum mentions required (1-10)")
 ):
     """
     Get entity relationship network for visualization
 
     Rate limit: 50 requests per minute per IP (more expensive query)
+
+    Args:
+        limit: Maximum number of entities to return
+        days: Only include articles from last N days
+        min_mentions: Minimum number of mentions required (default: 3, range: 1-10)
 
     Returns nodes (entities) and edges (relationships)
     """
@@ -353,7 +359,7 @@ def get_entity_network(
                 WHERE published_date >= CURRENT_DATE - INTERVAL %s
             )
             GROUP BY entity, entity_type
-            HAVING COUNT(*) >= 2  -- At least 2 mentions
+            HAVING COUNT(*) >= %s
             ORDER BY mention_count DESC
             LIMIT %s
         )
@@ -363,7 +369,7 @@ def get_entity_network(
 
     with db.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(entity_query, (f'{days} days', limit))
+            cur.execute(entity_query, (f'{days} days', min_mentions, limit))
             entity_rows = cur.fetchall()
 
             entities = []
@@ -419,11 +425,19 @@ def get_entity_network(
 
 @app.get("/api/entities/network/article/{article_id}")
 @limiter.limit("100/minute")
-def get_article_entity_network(request: Request, article_id: int):
+def get_article_entity_network(
+    request: Request,
+    article_id: int,
+    max_connections_per_entity: int = Query(10, ge=5, le=50, description="Max connections per entity (5-50)")
+):
     """
-    Get entity network for a single article (clean, focused view)
+    Get entity network for a single article with per-entity degree capping
 
     Rate limit: 100 requests per minute per IP
+
+    Applies intelligent filtering:
+    - Small articles (≤10 entities): Keep all relationships
+    - Large articles: Cap each entity to top-k strongest connections
 
     Returns all entities and their relationships within this article
     """
@@ -446,46 +460,113 @@ def get_article_entity_network(request: Request, article_id: int):
 
             entities = []
             entity_set = set()
+            entity_confidence_map = {}
 
             for row in entity_rows:
                 entity_name = row[0]
+                confidence = float(row[2]) if row[2] else 0.0
                 entities.append({
                     'id': entity_name,
                     'label': entity_name,
                     'type': row[1],
                     'weight': 1,  # Single article, all entities equal weight
-                    'confidence': float(row[2]) if row[2] else 0.0
+                    'confidence': confidence
                 })
                 entity_set.add(entity_name)
+                entity_confidence_map[entity_name] = confidence
 
     # Get relationships between these entities (from this article)
     entity_list = list(entity_set)
+    entity_count = len(entity_list)
 
+    # Query for relationships with cross-article counts for ranking
     relationships_query = """
+        WITH cross_article_counts AS (
+            SELECT
+                LEAST(entity_a, entity_b) as ent_a,
+                GREATEST(entity_a, entity_b) as ent_b,
+                COUNT(DISTINCT article_id) as article_count
+            FROM entity_relationships
+            WHERE (entity_a = ANY(%s) AND entity_b = ANY(%s))
+            GROUP BY ent_a, ent_b
+        )
         SELECT
-            entity_a, entity_b, relationship_type,
-            relationship_description, confidence
-        FROM entity_relationships
-        WHERE article_id = %s
-          AND entity_a = ANY(%s)
-          AND entity_b = ANY(%s)
+            er.entity_a, er.entity_b, er.relationship_type,
+            er.relationship_description, er.confidence,
+            COALESCE(cac.article_count, 1) as cross_article_count
+        FROM entity_relationships er
+        LEFT JOIN cross_article_counts cac ON (
+            LEAST(er.entity_a, er.entity_b) = cac.ent_a AND
+            GREATEST(er.entity_a, er.entity_b) = cac.ent_b
+        )
+        WHERE er.article_id = %s
+          AND er.entity_a = ANY(%s)
+          AND er.entity_b = ANY(%s)
+        ORDER BY cross_article_count DESC, er.confidence DESC
     """
 
     with db.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(relationships_query, (article_id, entity_list, entity_list))
+            cur.execute(relationships_query, (entity_list, entity_list, article_id, entity_list, entity_list))
             rel_rows = cur.fetchall()
 
-            relationships = []
+            # Build all relationships with scores
+            all_relationships = []
             for row in rel_rows:
-                relationships.append({
-                    'source': row[0],
-                    'target': row[1],
+                entity_a, entity_b = row[0], row[1]
+                cross_article_count = row[5]
+                confidence = row[4]
+
+                # Calculate relationship strength score
+                strength = (
+                    (cross_article_count / 5.0) * 0.6 +  # Cross-article signal (capped at 5)
+                    confidence * 0.4  # Confidence
+                )
+
+                all_relationships.append({
+                    'source': entity_a,
+                    'target': entity_b,
                     'type': row[2],
                     'label': row[3] or row[2],
-                    'confidence': row[4],
-                    'count': 1
+                    'confidence': confidence,
+                    'count': cross_article_count,
+                    'strength': min(strength, 1.0)
                 })
+
+            # Apply degree capping for large articles only
+            if entity_count <= 10:
+                # Small article: keep all relationships
+                filtered_relationships = all_relationships
+            else:
+                # Large article: apply per-entity degree cap
+                from collections import defaultdict
+
+                # Track edges per entity
+                entity_edges = defaultdict(list)
+                for rel in all_relationships:
+                    entity_edges[rel['source']].append(rel)
+                    entity_edges[rel['target']].append(rel)
+
+                # For each entity, keep only top-k edges
+                edges_to_keep = set()
+                for entity, edges in entity_edges.items():
+                    # Sort by: strength > cross-article count > confidence
+                    sorted_edges = sorted(
+                        edges,
+                        key=lambda e: (-e['strength'], -e['count'], -e['confidence'])
+                    )
+
+                    # Keep top k edges for this entity
+                    for edge in sorted_edges[:max_connections_per_entity]:
+                        # Store as frozenset so we don't count same edge twice
+                        edge_key = frozenset([edge['source'], edge['target']])
+                        edges_to_keep.add(edge_key)
+
+                # Filter to kept edges
+                filtered_relationships = [
+                    rel for rel in all_relationships
+                    if frozenset([rel['source'], rel['target']]) in edges_to_keep
+                ]
 
             # Get article title for context
             cur.execute("SELECT title FROM articles WHERE id = %s", (article_id,))
@@ -494,12 +575,15 @@ def get_article_entity_network(request: Request, article_id: int):
 
     return {
         'nodes': entities,
-        'connections': relationships,
+        'connections': filtered_relationships,
         'total_entities': len(entities),
-        'total_relationships': len(relationships),
+        'total_relationships': len(filtered_relationships),
+        'original_relationship_count': len(all_relationships),
         'article_id': article_id,
         'article_title': article_title,
-        'view_type': 'article'
+        'view_type': 'article',
+        'filtering_applied': entity_count > 10,
+        'max_connections_per_entity': max_connections_per_entity if entity_count > 10 else 'unlimited'
     }
 
 
@@ -760,6 +844,501 @@ def get_sources(request: Request):
                 })
 
             return {'sources': sources}
+
+
+# ============================================================================
+# TOPICS & TRENDS ENDPOINTS
+# ============================================================================
+
+@app.get("/api/topics")
+@limiter.limit("50/minute")
+def get_topics(
+    request: Request,
+    days: Optional[int] = 30,
+    min_articles: int = Query(3, ge=1, le=20)
+):
+    """
+    Get all topics with metadata and trend analysis
+
+    Rate limit: 50 requests per minute per IP
+
+    Args:
+        days: Time window for analysis (default: 30 days)
+        min_articles: Minimum articles per topic to include (1-20)
+
+    Returns:
+        List of topics with article counts, keywords, trends, date ranges
+    """
+
+    # Get most recent topic computation
+    topics_query = """
+        WITH latest_computation AS (
+            SELECT MAX(computed_at) as latest_time
+            FROM corpus_topics
+        ),
+        recent_topics AS (
+            SELECT
+                ct.topic_id,
+                ct.topic_label,
+                ct.keywords,
+                ct.article_count,
+                ct.computed_at
+            FROM corpus_topics ct
+            CROSS JOIN latest_computation lc
+            WHERE ct.computed_at = lc.latest_time
+              AND ct.topic_id != -1
+              AND ct.article_count >= %s
+        )
+        SELECT
+            rt.topic_id,
+            rt.topic_label,
+            rt.keywords,
+            rt.article_count,
+            rt.computed_at,
+            MIN(a.published_date) as first_article_date,
+            MAX(a.published_date) as latest_article_date,
+            COUNT(DISTINCT a.id) FILTER (
+                WHERE a.published_date >= CURRENT_DATE - INTERVAL '7 days'
+            ) as articles_last_week,
+            COUNT(DISTINCT a.id) FILTER (
+                WHERE a.published_date >= CURRENT_DATE - INTERVAL '14 days'
+                  AND a.published_date < CURRENT_DATE - INTERVAL '7 days'
+            ) as articles_prev_week
+        FROM recent_topics rt
+        LEFT JOIN article_topics at ON rt.topic_id = at.topic_id
+        LEFT JOIN articles a ON at.article_id = a.id
+        WHERE a.published_date >= CURRENT_DATE - INTERVAL %s
+           OR a.published_date IS NULL
+        GROUP BY rt.topic_id, rt.topic_label, rt.keywords, rt.article_count, rt.computed_at
+        ORDER BY rt.article_count DESC
+    """
+
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(topics_query, (min_articles, f'{days} days'))
+            rows = cur.fetchall()
+
+            topics = []
+            for row in rows:
+                topic_id = row[0]
+                articles_last_week = row[7] or 0
+                articles_prev_week = row[8] or 0
+
+                # Calculate trend direction
+                if articles_prev_week > 0:
+                    velocity = ((articles_last_week - articles_prev_week) / articles_prev_week) * 100
+                else:
+                    velocity = 100 if articles_last_week > 0 else 0
+
+                # Determine trend
+                if velocity > 15:
+                    trend = 'rising'
+                    trend_symbol = '↑'
+                elif velocity < -15:
+                    trend = 'falling'
+                    trend_symbol = '↓'
+                else:
+                    trend = 'stable'
+                    trend_symbol = '→'
+
+                topics.append({
+                    'topic_id': topic_id,
+                    'label': row[1] or f'Topic {topic_id}',
+                    'keywords': row[2] or [],
+                    'article_count': row[3] or 0,
+                    'computed_at': row[4].isoformat() if row[4] else None,
+                    'date_range': {
+                        'first': row[5].isoformat() if row[5] else None,
+                        'latest': row[6].isoformat() if row[6] else None
+                    },
+                    'trend': {
+                        'direction': trend,
+                        'symbol': trend_symbol,
+                        'velocity': round(velocity, 1),
+                        'articles_last_week': articles_last_week,
+                        'articles_prev_week': articles_prev_week
+                    }
+                })
+
+            return {
+                'topics': topics,
+                'count': len(topics),
+                'days': days,
+                'min_articles': min_articles
+            }
+
+
+@app.get("/api/topics/{topic_id}")
+@limiter.limit("50/minute")
+def get_topic_detail(
+    request: Request,
+    topic_id: int,
+    days: Optional[int] = 30
+):
+    """
+    Get detailed information about a specific topic
+
+    Rate limit: 50 requests per minute per IP
+
+    Args:
+        topic_id: Topic ID to retrieve
+        days: Time window for analysis
+
+    Returns:
+        Detailed topic info including timeline, keywords, representative articles
+    """
+
+    # Get topic metadata
+    topic_query = """
+        SELECT
+            topic_id, topic_label, keywords, article_count, computed_at
+        FROM corpus_topics
+        WHERE topic_id = %s
+        ORDER BY computed_at DESC
+        LIMIT 1
+    """
+
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(topic_query, (topic_id,))
+            topic_row = cur.fetchone()
+
+            if not topic_row:
+                raise HTTPException(status_code=404, detail=f"Topic {topic_id} not found")
+
+            topic_data = {
+                'topic_id': topic_row[0],
+                'label': topic_row[1] or f'Topic {topic_row[0]}',
+                'keywords': topic_row[2] or [],
+                'article_count': topic_row[3] or 0,
+                'computed_at': topic_row[4].isoformat() if topic_row[4] else None
+            }
+
+            # Get top entities for this topic
+            entities_query = """
+                SELECT f.entity, f.entity_type, COUNT(*) as mention_count
+                FROM article_topics at
+                JOIN facts f ON at.article_id = f.article_id
+                WHERE at.topic_id = %s
+                GROUP BY f.entity, f.entity_type
+                ORDER BY mention_count DESC
+                LIMIT 10
+            """
+            cur.execute(entities_query, (topic_id,))
+            entity_rows = cur.fetchall()
+
+            topic_data['top_entities'] = [
+                {
+                    'entity': row[0],
+                    'type': row[1],
+                    'mention_count': row[2]
+                }
+                for row in entity_rows
+            ]
+
+            return topic_data
+
+
+@app.get("/api/topics/{topic_id}/timeline")
+@limiter.limit("50/minute")
+def get_topic_timeline(
+    request: Request,
+    topic_id: int,
+    days: Optional[int] = 30,
+    granularity: str = Query('day', regex='^(day|week|month)$')
+):
+    """
+    Get article volume timeline for a topic
+
+    Rate limit: 50 requests per minute per IP
+
+    Args:
+        topic_id: Topic ID
+        days: Time window
+        granularity: Time bucket size (day, week, month)
+
+    Returns:
+        Time series data of article counts
+    """
+
+    # Map granularity to PostgreSQL interval
+    interval_map = {
+        'day': '1 day',
+        'week': '1 week',
+        'month': '1 month'
+    }
+
+    timeline_query = f"""
+        SELECT
+            DATE_TRUNC(%s, a.published_date) as time_bucket,
+            COUNT(DISTINCT a.id) as article_count
+        FROM article_topics at
+        JOIN articles a ON at.article_id = a.id
+        WHERE at.topic_id = %s
+          AND a.published_date >= CURRENT_DATE - INTERVAL %s
+        GROUP BY time_bucket
+        ORDER BY time_bucket ASC
+    """
+
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(timeline_query, (granularity, topic_id, f'{days} days'))
+            rows = cur.fetchall()
+
+            timeline = [
+                {
+                    'date': row[0].isoformat() if row[0] else None,
+                    'article_count': row[1]
+                }
+                for row in rows
+            ]
+
+            return {
+                'topic_id': topic_id,
+                'timeline': timeline,
+                'granularity': granularity,
+                'days': days
+            }
+
+
+@app.get("/api/topics/{topic_id}/articles")
+@limiter.limit("50/minute")
+def get_topic_articles(
+    request: Request,
+    topic_id: int,
+    limit: int = Query(20, le=100),
+    offset: int = Query(0, ge=0)
+):
+    """
+    Get articles belonging to a topic, ranked by relevance
+
+    Rate limit: 50 requests per minute per IP
+
+    Args:
+        topic_id: Topic ID
+        limit: Maximum articles to return
+        offset: Pagination offset
+
+    Returns:
+        List of articles with topic probability scores
+    """
+
+    articles_query = """
+        SELECT
+            a.id, a.title, a.url, a.source, a.published_date,
+            a.summary, at.probability
+        FROM article_topics at
+        JOIN articles a ON at.article_id = a.id
+        WHERE at.topic_id = %s
+        ORDER BY at.probability DESC, a.published_date DESC
+        LIMIT %s OFFSET %s
+    """
+
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(articles_query, (topic_id, limit, offset))
+            rows = cur.fetchall()
+
+            articles = []
+            for row in rows:
+                articles.append({
+                    'id': row[0],
+                    'title': row[1],
+                    'url': row[2],
+                    'source': row[3],
+                    'published_date': row[4].isoformat() if row[4] else None,
+                    'summary': row[5],
+                    'topic_probability': float(row[6]) if row[6] else 0.0
+                })
+
+            return {
+                'topic_id': topic_id,
+                'articles': articles,
+                'count': len(articles),
+                'limit': limit,
+                'offset': offset
+            }
+
+
+@app.get("/api/topics/{topic_id}/entities")
+@limiter.limit("50/minute")
+def get_topic_entity_network(
+    request: Request,
+    topic_id: int,
+    limit: int = Query(50, le=200)
+):
+    """
+    Get entity network filtered to a specific topic
+
+    Rate limit: 50 requests per minute per IP
+
+    Args:
+        topic_id: Topic ID
+        limit: Maximum entities to return
+
+    Returns:
+        Entity network nodes and connections for this topic
+    """
+
+    # Get entities for this topic
+    entities_query = """
+        WITH topic_entities AS (
+            SELECT DISTINCT f.entity, f.entity_type, COUNT(*) as mention_count
+            FROM article_topics at
+            JOIN facts f ON at.article_id = f.article_id
+            WHERE at.topic_id = %s
+            GROUP BY f.entity, f.entity_type
+            ORDER BY mention_count DESC
+            LIMIT %s
+        )
+        SELECT entity, entity_type, mention_count
+        FROM topic_entities
+    """
+
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(entities_query, (topic_id, limit))
+            entity_rows = cur.fetchall()
+
+            entities = []
+            entity_set = set()
+
+            for row in entity_rows:
+                entity_name = row[0]
+                entities.append({
+                    'id': entity_name,
+                    'label': entity_name,
+                    'type': row[1],
+                    'weight': row[2]
+                })
+                entity_set.add(entity_name)
+
+            # Get relationships between these entities within topic articles
+            if entity_set:
+                entity_list = list(entity_set)
+
+                relationships_query = """
+                    SELECT DISTINCT
+                        er.entity_a, er.entity_b, er.relationship_type,
+                        er.relationship_description, er.confidence,
+                        COUNT(*) as occurrence_count
+                    FROM entity_relationships er
+                    WHERE er.article_id IN (
+                        SELECT article_id FROM article_topics WHERE topic_id = %s
+                    )
+                    AND er.entity_a = ANY(%s)
+                    AND er.entity_b = ANY(%s)
+                    GROUP BY er.entity_a, er.entity_b, er.relationship_type,
+                             er.relationship_description, er.confidence
+                """
+
+                cur.execute(relationships_query, (topic_id, entity_list, entity_list))
+                rel_rows = cur.fetchall()
+
+                relationships = []
+                for row in rel_rows:
+                    relationships.append({
+                        'source': row[0],
+                        'target': row[1],
+                        'type': row[2],
+                        'label': row[3] or row[2],
+                        'confidence': row[4],
+                        'count': row[5]
+                    })
+            else:
+                relationships = []
+
+            return {
+                'topic_id': topic_id,
+                'nodes': entities,
+                'connections': relationships,
+                'total_entities': len(entities),
+                'total_relationships': len(relationships)
+            }
+
+
+@app.get("/api/topics/trending")
+@limiter.limit("50/minute")
+def get_trending_topics(
+    request: Request,
+    limit: int = Query(10, le=50)
+):
+    """
+    Get topics with highest recent growth (trending topics)
+
+    Rate limit: 50 requests per minute per IP
+
+    Args:
+        limit: Maximum topics to return
+
+    Returns:
+        Topics sorted by velocity (growth rate)
+    """
+
+    trending_query = """
+        WITH latest_computation AS (
+            SELECT MAX(computed_at) as latest_time
+            FROM corpus_topics
+        ),
+        topic_trends AS (
+            SELECT
+                ct.topic_id,
+                ct.topic_label,
+                ct.keywords,
+                ct.article_count,
+                COUNT(DISTINCT a.id) FILTER (
+                    WHERE a.published_date >= CURRENT_DATE - INTERVAL '7 days'
+                ) as articles_last_week,
+                COUNT(DISTINCT a.id) FILTER (
+                    WHERE a.published_date >= CURRENT_DATE - INTERVAL '14 days'
+                      AND a.published_date < CURRENT_DATE - INTERVAL '7 days'
+                ) as articles_prev_week
+            FROM corpus_topics ct
+            CROSS JOIN latest_computation lc
+            LEFT JOIN article_topics at ON ct.topic_id = at.topic_id
+            LEFT JOIN articles a ON at.article_id = a.id
+            WHERE ct.computed_at = lc.latest_time
+              AND ct.topic_id != -1
+            GROUP BY ct.topic_id, ct.topic_label, ct.keywords, ct.article_count
+        )
+        SELECT
+            topic_id, topic_label, keywords, article_count,
+            articles_last_week, articles_prev_week,
+            CASE
+                WHEN articles_prev_week > 0
+                THEN ((articles_last_week - articles_prev_week)::float / articles_prev_week) * 100
+                ELSE CASE WHEN articles_last_week > 0 THEN 100 ELSE 0 END
+            END as velocity
+        FROM topic_trends
+        WHERE articles_last_week > 0
+        ORDER BY velocity DESC, articles_last_week DESC
+        LIMIT %s
+    """
+
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(trending_query, (limit,))
+            rows = cur.fetchall()
+
+            topics = []
+            for row in rows:
+                velocity = float(row[6]) if row[6] else 0.0
+
+                topics.append({
+                    'topic_id': row[0],
+                    'label': row[1] or f'Topic {row[0]}',
+                    'keywords': row[2] or [],
+                    'article_count': row[3] or 0,
+                    'articles_last_week': row[4] or 0,
+                    'articles_prev_week': row[5] or 0,
+                    'velocity': round(velocity, 1),
+                    'trend_symbol': '↑' if velocity > 0 else '→'
+                })
+
+            return {
+                'trending_topics': topics,
+                'count': len(topics)
+            }
 
 
 # ============================================================================

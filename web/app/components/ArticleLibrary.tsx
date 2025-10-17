@@ -68,7 +68,7 @@ export default function ArticleLibrary({ entityColors, onArticleClick }: Article
       try {
         console.log('[ArticleLibrary] Fetching articles...');
         // Fetch all articles without time restrictions
-        const data = await api.getArticles({ limit: 100, days: 36500 }); // ~100 years
+        const data = await api.getArticles({ limit: 1000, days: 36500 }); // Increased to 1000, ~100 years
         console.log('[ArticleLibrary] Received data:', { count: data.articles?.length, hasArticles: !!data.articles });
 
         // Transform API articles to display format
@@ -144,7 +144,9 @@ export default function ArticleLibrary({ entityColors, onArticleClick }: Article
       filtered = filtered.filter(article =>
         article.title.toLowerCase().includes(query) ||
         article.consensus_summary.toLowerCase().includes(query) ||
-        article.extracted_facts.some(fact => fact.entity.toLowerCase().includes(query))
+        article.extracted_facts.some(fact => fact.entity.toLowerCase().includes(query)) ||
+        article.id.toString().includes(query) ||  // Search by article ID
+        article.article_id.includes(query)  // Search by article_id string
       );
     }
 
