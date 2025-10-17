@@ -11,6 +11,7 @@ import time
 
 from .main import VermontNewsPipeline
 from .modules.database import VermontSignalDatabase
+from .modules.position_tracker import PositionTracker
 from .config import CostConfig
 
 logger = logging.getLogger(__name__)
@@ -139,6 +140,14 @@ class BatchProcessor:
         self.cost_protection = CostProtection(self.db)
         self.max_articles_per_run = max_articles_per_run
 
+        # Initialize position tracker for entity proximity analysis
+        try:
+            self.position_tracker = PositionTracker()
+            logger.info("Position tracker initialized successfully")
+        except Exception as e:
+            logger.warning(f"Position tracker initialization failed: {e}. Will continue without position tracking.")
+            self.position_tracker = None
+
         logger.info("Batch processor initialized")
 
     def process_batch(
@@ -242,7 +251,7 @@ class BatchProcessor:
                 processing_time = time.time() - start_time
 
                 # Store results in database
-                self._store_results(article['id'], result, processing_time)
+                self._store_results(article['id'], article['content'], result, processing_time)
 
                 # Mark as processed
                 self.db.mark_article_processed(article['id'], success=True)
@@ -372,10 +381,11 @@ class BatchProcessor:
     def _store_results(
         self,
         article_id: int,
+        article_content: str,
         pipeline_result: Dict,
         processing_time: float
     ):
-        """Store V2 pipeline results in database"""
+        """Store V2 pipeline results in database with position tracking"""
 
         # Store extraction result summary
         extraction_result_id = self.db.store_extraction_result(
@@ -386,12 +396,28 @@ class BatchProcessor:
 
         # Store extracted facts (only if extraction succeeded)
         if 'extracted_facts' in pipeline_result:
+            facts = pipeline_result['extracted_facts']
+
+            # Add position tracking if available
+            if self.position_tracker and article_content:
+                try:
+                    logger.debug(f"Tracking entity positions for {len(facts)} entities...")
+                    facts = self.position_tracker.enrich_entities_with_positions(
+                        text=article_content,
+                        entities=facts
+                    )
+                    positions_tracked = sum(1 for f in facts if f.get('sentence_index') is not None)
+                    logger.info(f"  Position tracking: {positions_tracked}/{len(facts)} entities located")
+                except Exception as e:
+                    logger.warning(f"Position tracking failed for article {article_id}: {e}. Continuing without positions.")
+                    # Facts still have all other data, just missing positions
+
             self.db.store_facts(
                 article_id=article_id,
                 extraction_result_id=extraction_result_id,
-                facts=pipeline_result['extracted_facts']
+                facts=facts
             )
-            logger.debug(f"Stored {len(pipeline_result['extracted_facts'])} facts for article {article_id}")
+            logger.debug(f"Stored {len(facts)} facts for article {article_id}")
         else:
             logger.warning(f"No extracted_facts in result for article {article_id} - LLM extraction may have failed")
 

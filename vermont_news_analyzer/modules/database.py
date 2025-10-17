@@ -202,7 +202,7 @@ class VermontSignalDatabase:
         CREATE INDEX IF NOT EXISTS idx_extraction_article ON extraction_results(article_id);
 
 
-        -- Extracted Facts (ensemble validated)
+        -- Extracted Facts (ensemble validated) with position tracking
         CREATE TABLE IF NOT EXISTS facts (
             id SERIAL PRIMARY KEY,
             article_id INTEGER REFERENCES articles(id) ON DELETE CASCADE,
@@ -216,6 +216,12 @@ class VermontSignalDatabase:
             -- Confidence and validation
             confidence FLOAT,
             source_models TEXT[],  -- Which models extracted this fact
+
+            -- Position tracking (for proximity-based relationships)
+            sentence_index INTEGER,
+            paragraph_index INTEGER,
+            char_start INTEGER,
+            char_end INTEGER,
 
             -- Wikidata enrichment
             wikidata_id VARCHAR(50),
@@ -235,6 +241,8 @@ class VermontSignalDatabase:
         CREATE INDEX IF NOT EXISTS idx_facts_entity_type ON facts(entity_type);
         CREATE INDEX IF NOT EXISTS idx_facts_confidence ON facts(confidence);
         CREATE INDEX IF NOT EXISTS idx_facts_wikidata ON facts(wikidata_id);
+        CREATE INDEX IF NOT EXISTS idx_facts_sentence ON facts(article_id, sentence_index) WHERE sentence_index IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_facts_paragraph ON facts(article_id, paragraph_index) WHERE paragraph_index IS NOT NULL;
 
 
         -- Entity Relationships (for network graph)
@@ -599,6 +607,7 @@ class VermontSignalDatabase:
             INSERT INTO facts (
                 article_id, extraction_result_id, entity, entity_type,
                 event_description, confidence, source_models,
+                sentence_index, paragraph_index, char_start, char_end,
                 wikidata_id, wikidata_label, wikidata_description,
                 wikidata_properties, note
             )
@@ -607,6 +616,10 @@ class VermontSignalDatabase:
             DO UPDATE SET
                 confidence = GREATEST(facts.confidence, EXCLUDED.confidence),
                 source_models = array_union(facts.source_models, EXCLUDED.source_models),
+                sentence_index = COALESCE(facts.sentence_index, EXCLUDED.sentence_index),
+                paragraph_index = COALESCE(facts.paragraph_index, EXCLUDED.paragraph_index),
+                char_start = COALESCE(facts.char_start, EXCLUDED.char_start),
+                char_end = COALESCE(facts.char_end, EXCLUDED.char_end),
                 wikidata_id = COALESCE(EXCLUDED.wikidata_id, facts.wikidata_id),
                 wikidata_label = COALESCE(EXCLUDED.wikidata_label, facts.wikidata_label),
                 wikidata_description = COALESCE(EXCLUDED.wikidata_description, facts.wikidata_description),
@@ -623,6 +636,10 @@ class VermontSignalDatabase:
                 fact.get('event_description'),
                 fact.get('confidence'),
                 fact.get('sources', []),
+                fact.get('sentence_index'),
+                fact.get('paragraph_index'),
+                fact.get('char_start'),
+                fact.get('char_end'),
                 fact.get('wikidata_id'),
                 fact.get('wikidata_label'),
                 fact.get('wikidata_description'),
