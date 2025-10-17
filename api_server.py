@@ -428,18 +428,26 @@ def get_entity_network(
 def get_article_entity_network(
     request: Request,
     article_id: int,
+    proximity_filter: str = Query('all', regex='^(all|same-sentence|adjacent|near)$'),
+    min_score: float = Query(0.0, ge=0.0, le=1.0),
     max_connections_per_entity: int = Query(10, ge=5, le=50, description="Max connections per entity (5-50)")
 ):
     """
-    Get entity network for a single article with per-entity degree capping
+    Get entity network for a single article with intelligent filtering
 
     Rate limit: 100 requests per minute per IP
 
-    Applies intelligent filtering:
-    - Small articles (≤10 entities): Keep all relationships
-    - Large articles: Cap each entity to top-k strongest connections
+    NEW PARAMETERS:
+        proximity_filter: Filter by proximity type
+            - 'all': All relationship types
+            - 'same-sentence': Only same-sentence co-occurrences
+            - 'adjacent': Same-sentence + adjacent sentences
+            - 'near': All proximity types (same, adjacent, near)
+        min_score: Minimum NPMI/score threshold (0.0-1.0)
+        max_connections_per_entity: Max edges per entity (legacy, for compatibility)
 
-    Returns all entities and their relationships within this article
+    Returns:
+        Entity network with metadata about filtering applied
     """
 
     # Get all entities from this article
@@ -479,49 +487,48 @@ def get_article_entity_network(
     entity_list = list(entity_set)
     entity_count = len(entity_list)
 
-    # Query for relationships with cross-article counts for ranking
+    # Build proximity filter
+    proximity_map = {
+        'same-sentence': ['same-sentence'],
+        'adjacent': ['same-sentence', 'adjacent-sentence'],
+        'near': ['same-sentence', 'adjacent-sentence', 'near-proximity'],
+        'all': None  # No filter
+    }
+    filter_types = proximity_map[proximity_filter]
+
+    # Query for relationships with new intelligent fields
     relationships_query = """
-        WITH cross_article_counts AS (
-            SELECT
-                LEAST(entity_a, entity_b) as ent_a,
-                GREATEST(entity_a, entity_b) as ent_b,
-                COUNT(DISTINCT article_id) as article_count
-            FROM entity_relationships
-            WHERE (entity_a = ANY(%s) AND entity_b = ANY(%s))
-            GROUP BY ent_a, ent_b
-        )
         SELECT
             er.entity_a, er.entity_b, er.relationship_type,
             er.relationship_description, er.confidence,
-            COALESCE(cac.article_count, 1) as cross_article_count
+            er.npmi_score, er.proximity_weight,
+            er.min_sentence_distance, er.raw_cooccurrence_count
         FROM entity_relationships er
-        LEFT JOIN cross_article_counts cac ON (
-            LEAST(er.entity_a, er.entity_b) = cac.ent_a AND
-            GREATEST(er.entity_a, er.entity_b) = cac.ent_b
-        )
         WHERE er.article_id = %s
           AND er.entity_a = ANY(%s)
           AND er.entity_b = ANY(%s)
-        ORDER BY cross_article_count DESC, er.confidence DESC
+          AND COALESCE(er.npmi_score, er.proximity_weight/10.0, 0) >= %s
+          AND (%s::text[] IS NULL OR er.relationship_type = ANY(%s))
+        ORDER BY COALESCE(er.npmi_score, er.proximity_weight/10.0) DESC, er.proximity_weight DESC
     """
 
     with db.get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(relationships_query, (entity_list, entity_list, article_id, entity_list, entity_list))
+            cur.execute(relationships_query, (article_id, entity_list, entity_list, min_score, filter_types, filter_types))
             rel_rows = cur.fetchall()
 
-            # Build all relationships with scores
+            # Build all relationships with new intelligent scoring
             all_relationships = []
             for row in rel_rows:
                 entity_a, entity_b = row[0], row[1]
-                cross_article_count = row[5]
-                confidence = row[4]
+                confidence = float(row[4]) if row[4] else 0.8
+                npmi = float(row[5]) if row[5] is not None else None
+                proximity_weight = float(row[6]) if row[6] else 0.0
+                min_distance = int(row[7]) if row[7] is not None else 999
+                raw_count = int(row[8]) if row[8] else 0
 
-                # Calculate relationship strength score
-                strength = (
-                    (cross_article_count / 5.0) * 0.6 +  # Cross-article signal (capped at 5)
-                    confidence * 0.4  # Confidence
-                )
+                # Use NPMI as primary score, fallback to normalized proximity
+                score = npmi if npmi is not None else min(1.0, proximity_weight / 10.0)
 
                 all_relationships.append({
                     'source': entity_a,
@@ -529,8 +536,12 @@ def get_article_entity_network(
                     'type': row[2],
                     'label': row[3] or row[2],
                     'confidence': confidence,
-                    'count': cross_article_count,
-                    'strength': min(strength, 1.0)
+                    'npmi': npmi,
+                    'proximity_weight': proximity_weight,
+                    'sentence_distance': min_distance,
+                    'raw_count': raw_count,
+                    'score': score,  # Unified score for sorting/filtering
+                    'strength': min(score * confidence, 1.0)  # Confidence-weighted strength
                 })
 
             # Apply degree capping for large articles only
@@ -582,8 +593,16 @@ def get_article_entity_network(
         'article_id': article_id,
         'article_title': article_title,
         'view_type': 'article',
-        'filtering_applied': entity_count > 10,
-        'max_connections_per_entity': max_connections_per_entity if entity_count > 10 else 'unlimited'
+        'filtering_applied': {
+            'proximity': proximity_filter,
+            'min_score': min_score,
+            'degree_cap': max_connections_per_entity if entity_count > 10 else None
+        },
+        'metadata': {
+            'intelligent_filtering': True,
+            'has_npmi_scores': any(r.get('npmi') is not None for r in filtered_relationships),
+            'has_proximity_weights': any(r.get('proximity_weight', 0) > 0 for r in filtered_relationships)
+        }
     }
 
 
