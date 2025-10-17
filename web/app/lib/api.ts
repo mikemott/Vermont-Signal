@@ -12,6 +12,7 @@ async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> 
   const url = `${API_BASE_URL}${endpoint}`;
 
   try {
+    console.log(`[API] Fetching: ${url}`);
     const response = await fetch(url, {
       ...options,
       headers:  {
@@ -20,14 +21,25 @@ async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> 
       },
     });
 
+    console.log(`[API] Response status: ${response.status}`);
+
     if (!response.ok) {
       const error = await response.json().catch(() => ({ detail: response.statusText }));
-      throw new Error(error.detail || `API Error: ${response.status}`);
+      const errorMessage = error.detail || `API Error: ${response.status}`;
+      console.error(`[API] Error response:`, error);
+      throw new Error(errorMessage);
     }
 
-    return await response.json();
+    const data = await response.json();
+    console.log(`[API] Success: ${url}`, { dataKeys: Object.keys(data) });
+    return data;
   } catch (error) {
-    console.error(`API request failed: ${endpoint}`, error);
+    console.error(`[API] Request failed: ${endpoint}`, {
+      error,
+      message: error instanceof Error ? error.message : String(error),
+      type: typeof error,
+      keys: error && typeof error === 'object' ? Object.keys(error) : []
+    });
     throw error;
   }
 }
@@ -125,6 +137,64 @@ export interface Source {
   article_count: number;
 }
 
+export interface Topic {
+  topic_id: number;
+  label: string;
+  keywords: string[];
+  article_count: number;
+  computed_at: string | null;
+  date_range?: {
+    first: string | null;
+    latest: string | null;
+  };
+  trend?: {
+    direction: 'rising' | 'stable' | 'falling';
+    symbol: string;
+    velocity: number;
+    articles_last_week: number;
+    articles_prev_week: number;
+  };
+}
+
+export interface TopicDetail {
+  topic_id: number;
+  label: string;
+  keywords: string[];
+  article_count: number;
+  computed_at: string | null;
+  top_entities: Array<{
+    entity: string;
+    type: string;
+    mention_count: number;
+  }>;
+}
+
+export interface TopicTimeline {
+  topic_id: number;
+  timeline: Array<{
+    date: string;
+    article_count: number;
+  }>;
+  granularity: 'day' | 'week' | 'month';
+  days: number;
+}
+
+export interface TopicArticles {
+  topic_id: number;
+  articles: Array<{
+    id: number;
+    title: string;
+    url: string;
+    source: string;
+    published_date: string | null;
+    summary: string | null;
+    topic_probability: number;
+  }>;
+  count: number;
+  limit: number;
+  offset: number;
+}
+
 // ============================================================================
 // API Functions
 // ============================================================================
@@ -160,10 +230,12 @@ export async function getArticle(articleId: number): Promise<Article> {
 export async function getEntityNetwork(params?: {
   limit?: number;
   days?: number;
+  min_mentions?: number;
 }): Promise<EntityNetwork> {
   const query = new URLSearchParams();
   if (params?.limit) query.set('limit', params.limit.toString());
   if (params?.days) query.set('days', params.days.toString());
+  if (params?.min_mentions) query.set('min_mentions', params.min_mentions.toString());
 
   return apiFetch(`/entities/network?${query.toString()}`);
 }
@@ -241,4 +313,94 @@ export async function triggerBatchProcessing(
       'Authorization': `Bearer ${token}`,
     },
   });
+}
+
+// ============================================================================
+// Topics & Trends API Functions
+// ============================================================================
+
+/**
+ * Get all topics with metadata and trend analysis
+ */
+export async function getTopics(params?: {
+  days?: number;
+  min_articles?: number;
+}): Promise<{ topics: Topic[]; count: number; days: number; min_articles: number }> {
+  const query = new URLSearchParams();
+  if (params?.days) query.set('days', params.days.toString());
+  if (params?.min_articles) query.set('min_articles', params.min_articles.toString());
+
+  return apiFetch(`/topics?${query.toString()}`);
+}
+
+/**
+ * Get detailed information about a specific topic
+ */
+export async function getTopicDetail(
+  topicId: number,
+  params?: { days?: number }
+): Promise<TopicDetail> {
+  const query = new URLSearchParams();
+  if (params?.days) query.set('days', params.days.toString());
+
+  return apiFetch(`/topics/${topicId}?${query.toString()}`);
+}
+
+/**
+ * Get article volume timeline for a topic
+ */
+export async function getTopicTimeline(
+  topicId: number,
+  params?: {
+    days?: number;
+    granularity?: 'day' | 'week' | 'month';
+  }
+): Promise<TopicTimeline> {
+  const query = new URLSearchParams();
+  if (params?.days) query.set('days', params.days.toString());
+  if (params?.granularity) query.set('granularity', params.granularity);
+
+  return apiFetch(`/topics/${topicId}/timeline?${query.toString()}`);
+}
+
+/**
+ * Get articles belonging to a topic, ranked by relevance
+ */
+export async function getTopicArticles(
+  topicId: number,
+  params?: {
+    limit?: number;
+    offset?: number;
+  }
+): Promise<TopicArticles> {
+  const query = new URLSearchParams();
+  if (params?.limit) query.set('limit', params.limit.toString());
+  if (params?.offset) query.set('offset', params.offset.toString());
+
+  return apiFetch(`/topics/${topicId}/articles?${query.toString()}`);
+}
+
+/**
+ * Get entity network filtered to a specific topic
+ */
+export async function getTopicEntityNetwork(
+  topicId: number,
+  params?: { limit?: number }
+): Promise<EntityNetwork> {
+  const query = new URLSearchParams();
+  if (params?.limit) query.set('limit', params.limit.toString());
+
+  return apiFetch(`/topics/${topicId}/entities?${query.toString()}`);
+}
+
+/**
+ * Get topics with highest recent growth (trending topics)
+ */
+export async function getTrendingTopics(params?: {
+  limit?: number;
+}): Promise<{ trending_topics: Topic[]; count: number }> {
+  const query = new URLSearchParams();
+  if (params?.limit) query.set('limit', params.limit.toString());
+
+  return apiFetch(`/topics/trending?${query.toString()}`);
 }
