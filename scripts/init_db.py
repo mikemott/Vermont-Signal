@@ -28,14 +28,15 @@ def main():
 
     # Verify tables exist
     print("\n3. Verifying tables...")
-    with db.conn.cursor() as cur:
-        cur.execute("""
-            SELECT table_name
-            FROM information_schema.tables
-            WHERE table_schema = 'public'
-            ORDER BY table_name
-        """)
-        tables = [row[0] for row in cur.fetchall()]
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+                ORDER BY table_name
+            """)
+            tables = [row[0] for row in cur.fetchall()]
 
         expected_tables = [
             'articles',

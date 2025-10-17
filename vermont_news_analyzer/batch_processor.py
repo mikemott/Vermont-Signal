@@ -11,24 +11,18 @@ import time
 
 from .main import VermontNewsPipeline
 from .modules.database import VermontSignalDatabase
+from .config import CostConfig
 
 logger = logging.getLogger(__name__)
 
 
 class CostProtection:
-    """Cost tracking and budget protection for multi-model pipeline"""
+    """
+    Cost tracking and budget protection for multi-model pipeline
 
-    # Cost per 1M tokens
-    CLAUDE_INPUT_COST = 3.00    # Claude Sonnet 4.5
-    CLAUDE_OUTPUT_COST = 15.00
-    GEMINI_INPUT_COST = 0.075   # Gemini 1.5 Flash
-    GEMINI_OUTPUT_COST = 0.30
-    GPT_INPUT_COST = 0.15       # GPT-4o-mini
-    GPT_OUTPUT_COST = 0.60
-
-    # Budget caps
-    MONTHLY_BUDGET_CAP = 25.00  # $25/month max
-    DAILY_BUDGET_CAP = 5.00     # $5/day max
+    Uses centralized CostConfig for pricing. All costs imported from config.py
+    to maintain single source of truth for pricing updates.
+    """
 
     def __init__(self, db: VermontSignalDatabase):
         self.db = db
@@ -60,25 +54,25 @@ class CostProtection:
         monthly_cost = self.get_monthly_cost()
         daily_cost = self.get_daily_cost()
 
-        monthly_remaining = self.MONTHLY_BUDGET_CAP - monthly_cost
-        daily_remaining = self.DAILY_BUDGET_CAP - daily_cost
+        monthly_remaining = CostConfig.MONTHLY_BUDGET_CAP - monthly_cost
+        daily_remaining = CostConfig.DAILY_BUDGET_CAP - daily_cost
 
         warnings = []
         can_proceed = True
 
         # Check monthly budget
-        if monthly_cost >= self.MONTHLY_BUDGET_CAP:
-            warnings.append(f"Monthly budget cap reached: ${monthly_cost:.2f} / ${self.MONTHLY_BUDGET_CAP:.2f}")
+        if monthly_cost >= CostConfig.MONTHLY_BUDGET_CAP:
+            warnings.append(f"Monthly budget cap reached: ${monthly_cost:.2f} / ${CostConfig.MONTHLY_BUDGET_CAP:.2f}")
             can_proceed = False
-        elif monthly_cost >= self.MONTHLY_BUDGET_CAP * 0.9:
-            warnings.append(f"⚠️  90% of monthly budget used: ${monthly_cost:.2f} / ${self.MONTHLY_BUDGET_CAP:.2f}")
+        elif monthly_cost >= CostConfig.MONTHLY_BUDGET_CAP * 0.9:
+            warnings.append(f"⚠️  90% of monthly budget used: ${monthly_cost:.2f} / ${CostConfig.MONTHLY_BUDGET_CAP:.2f}")
 
         # Check daily budget
-        if daily_cost >= self.DAILY_BUDGET_CAP:
-            warnings.append(f"Daily budget cap reached: ${daily_cost:.2f} / ${self.DAILY_BUDGET_CAP:.2f}")
+        if daily_cost >= CostConfig.DAILY_BUDGET_CAP:
+            warnings.append(f"Daily budget cap reached: ${daily_cost:.2f} / ${CostConfig.DAILY_BUDGET_CAP:.2f}")
             can_proceed = False
-        elif daily_cost >= self.DAILY_BUDGET_CAP * 0.8:
-            warnings.append(f"⚠️  80% of daily budget used: ${daily_cost:.2f} / ${self.DAILY_BUDGET_CAP:.2f}")
+        elif daily_cost >= CostConfig.DAILY_BUDGET_CAP * 0.8:
+            warnings.append(f"⚠️  80% of daily budget used: ${daily_cost:.2f} / ${CostConfig.DAILY_BUDGET_CAP:.2f}")
 
         return {
             'can_proceed': can_proceed,
@@ -105,25 +99,14 @@ class CostProtection:
         # Estimate output tokens (summary + facts)
         output_tokens = 500
 
-        # Calculate costs for all 3 models
-        claude_cost = (
-            (input_tokens * self.CLAUDE_INPUT_COST / 1_000_000) +
-            (output_tokens * self.CLAUDE_OUTPUT_COST / 1_000_000)
+        # Use centralized cost calculation from config
+        costs = CostConfig.calculate_article_cost(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            include_arbitration=True
         )
 
-        gemini_cost = (
-            (input_tokens * self.GEMINI_INPUT_COST / 1_000_000) +
-            (output_tokens * self.GEMINI_OUTPUT_COST / 1_000_000)
-        )
-
-        # GPT only used for arbitration (~30% of articles)
-        gpt_cost = (
-            (input_tokens * self.GPT_INPUT_COST / 1_000_000) +
-            (output_tokens * self.GPT_OUTPUT_COST / 1_000_000)
-        ) * 0.3
-
-        total = claude_cost + gemini_cost + gpt_cost
-        return total
+        return costs['total']
 
 
 class BatchProcessor:
@@ -184,8 +167,8 @@ class BatchProcessor:
             budget_status = self.cost_protection.check_budget()
 
             logger.info(f"\n💰 Budget Status:")
-            logger.info(f"  Monthly: ${budget_status['monthly_spent']:.2f} / ${self.cost_protection.MONTHLY_BUDGET_CAP:.2f}")
-            logger.info(f"  Daily: ${budget_status['daily_spent']:.2f} / ${self.cost_protection.DAILY_BUDGET_CAP:.2f}")
+            logger.info(f"  Monthly: ${budget_status['monthly_spent']:.2f} / ${CostConfig.MONTHLY_BUDGET_CAP:.2f}")
+            logger.info(f"  Daily: ${budget_status['daily_spent']:.2f} / ${CostConfig.DAILY_BUDGET_CAP:.2f}")
 
             if budget_status['warnings']:
                 for warning in budget_status['warnings']:
@@ -285,6 +268,18 @@ class BatchProcessor:
                     'error': str(e)
                 })
 
+        # Generate entity relationships for newly processed articles
+        if stats['processed'] > 0:
+            logger.info("\n" + "-" * 80)
+            logger.info("GENERATING ENTITY RELATIONSHIPS")
+            logger.info("-" * 80)
+            try:
+                relationship_count = self.db.generate_cooccurrence_relationships(days=30)
+                logger.info(f"✓ Generated {relationship_count} entity relationships")
+            except Exception as e:
+                logger.error(f"✗ Relationship generation failed: {e}")
+                # Don't fail the batch if relationship generation fails
+
         # Final summary
         logger.info("\n" + "=" * 80)
         logger.info("BATCH PROCESSING COMPLETE")
@@ -298,8 +293,8 @@ class BatchProcessor:
         # Final budget check
         budget_status = self.cost_protection.check_budget()
         logger.info(f"\n💰 Final Budget Status:")
-        logger.info(f"  Monthly: ${budget_status['monthly_spent']:.2f} / ${self.cost_protection.MONTHLY_BUDGET_CAP:.2f}")
-        logger.info(f"  Daily: ${budget_status['daily_spent']:.2f} / ${self.cost_protection.DAILY_BUDGET_CAP:.2f}")
+        logger.info(f"  Monthly: ${budget_status['monthly_spent']:.2f} / ${CostConfig.MONTHLY_BUDGET_CAP:.2f}")
+        logger.info(f"  Daily: ${budget_status['daily_spent']:.2f} / ${CostConfig.DAILY_BUDGET_CAP:.2f}")
         logger.info("=" * 80)
 
         stats['success'] = True
@@ -320,20 +315,12 @@ class BatchProcessor:
             logger.warning(f"No LLM usage data found for article {article_id}")
             return
 
-        # Cost constants (per 1M tokens)
-        CLAUDE_INPUT = 3.00
-        CLAUDE_OUTPUT = 15.00
-        GEMINI_INPUT = 0.075
-        GEMINI_OUTPUT = 0.30
-        GPT_INPUT = 0.15
-        GPT_OUTPUT = 0.60
-
         # Log Claude costs
         if 'claude' in llm_usage and llm_usage['claude']:
             usage = llm_usage['claude']
             input_tokens = usage.get('input_tokens', 0)
             output_tokens = usage.get('output_tokens', 0)
-            cost = (input_tokens * CLAUDE_INPUT + output_tokens * CLAUDE_OUTPUT) / 1_000_000
+            cost = (input_tokens * CostConfig.CLAUDE_INPUT_COST + output_tokens * CostConfig.CLAUDE_OUTPUT_COST) / 1_000_000
 
             self.db.log_api_cost(
                 article_id=article_id,
@@ -351,7 +338,7 @@ class BatchProcessor:
             usage = llm_usage['gemini']
             input_tokens = usage.get('input_tokens', 0)
             output_tokens = usage.get('output_tokens', 0)
-            cost = (input_tokens * GEMINI_INPUT + output_tokens * GEMINI_OUTPUT) / 1_000_000
+            cost = (input_tokens * CostConfig.GEMINI_INPUT_COST + output_tokens * CostConfig.GEMINI_OUTPUT_COST) / 1_000_000
 
             self.db.log_api_cost(
                 article_id=article_id,
@@ -369,7 +356,7 @@ class BatchProcessor:
             usage = llm_usage['gpt']
             input_tokens = usage.get('prompt_tokens', 0)
             output_tokens = usage.get('completion_tokens', 0)
-            cost = (input_tokens * GPT_INPUT + output_tokens * GPT_OUTPUT) / 1_000_000
+            cost = (input_tokens * CostConfig.GPT_INPUT_COST + output_tokens * CostConfig.GPT_OUTPUT_COST) / 1_000_000
 
             self.db.log_api_cost(
                 article_id=article_id,
@@ -397,12 +384,16 @@ class BatchProcessor:
             processing_time=processing_time
         )
 
-        # Store extracted facts
-        self.db.store_facts(
-            article_id=article_id,
-            extraction_result_id=extraction_result_id,
-            facts=pipeline_result['extracted_facts']
-        )
+        # Store extracted facts (only if extraction succeeded)
+        if 'extracted_facts' in pipeline_result:
+            self.db.store_facts(
+                article_id=article_id,
+                extraction_result_id=extraction_result_id,
+                facts=pipeline_result['extracted_facts']
+            )
+            logger.debug(f"Stored {len(pipeline_result['extracted_facts'])} facts for article {article_id}")
+        else:
+            logger.warning(f"No extracted_facts in result for article {article_id} - LLM extraction may have failed")
 
         # Log API costs for budget tracking
         self._log_api_costs(article_id, pipeline_result)

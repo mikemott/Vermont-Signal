@@ -55,6 +55,14 @@ export default function EntityNetworkD3({
     if (!connections || !Array.isArray(connections)) return;
     if (typeof window === 'undefined') return;
 
+    // Debug logging
+    console.log('[EntityNetworkD3] Rendering network:', {
+      entityCount: entities.length,
+      connectionCount: connections.length,
+      sampleEntities: entities.slice(0, 3).map(e => e.id),
+      sampleConnections: connections.slice(0, 3)
+    });
+
     // Clear previous content
     d3.select(svgRef.current).selectAll('*').remove();
 
@@ -100,9 +108,27 @@ export default function EntityNetworkD3({
         label: c.label || 'related',
       }));
 
-    // Create force simulation with responsive parameters
-    const linkDistance = isMobile ? 120 : 180;
-    const chargeStrength = isMobile ? -600 : -1000;
+    // Calculate connection density to adapt forces
+    const maxPossibleLinks = nodes.length * (nodes.length - 1) / 2;
+    const connectionDensity = maxPossibleLinks > 0 ? links.length / maxPossibleLinks : 0;
+    const isSpareNetwork = connectionDensity < 0.2 || links.length < nodes.length * 0.5;
+
+    console.log('[EntityNetworkD3] Network density:', {
+      nodes: nodes.length,
+      links: links.length,
+      density: connectionDensity.toFixed(2),
+      isSparse: isSpareNetwork
+    });
+
+    // Adaptive force parameters based on network density
+    const linkDistance = isMobile ? 120 : 150;
+
+    // Reduce charge strength for sparse networks to prevent spreading
+    const baseCharge = isMobile ? -600 : -1000;
+    const chargeStrength = isSpareNetwork ? baseCharge * 0.3 : baseCharge;
+
+    // Stronger centering for sparse networks
+    const centerStrength = isSpareNetwork ? 0.5 : 0.05;
 
     const simulation = d3.forceSimulation(nodes)
       .force('link', d3.forceLink<Node, Link>(links)
@@ -110,7 +136,10 @@ export default function EntityNetworkD3({
         .distance(linkDistance))
       .force('charge', d3.forceManyBody().strength(chargeStrength))
       .force('center', d3.forceCenter(svgWidth / 2, svgHeight / 2))
-      .force('collision', d3.forceCollide().radius(d => getNodeRadius((d as Node).weight) + 10));
+      .force('collision', d3.forceCollide().radius(d => getNodeRadius((d as Node).weight) + 10))
+      // Add boundary forces to keep nodes within viewport
+      .force('x', d3.forceX(svgWidth / 2).strength(centerStrength))
+      .force('y', d3.forceY(svgHeight / 2).strength(centerStrength));
 
     // Create container for zoom
     const g = svg.append('g');

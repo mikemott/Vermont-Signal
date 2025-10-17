@@ -423,7 +423,7 @@ function EntityNetworkBuilder({
       {/* Network Visualization */}
       {networkData && (
         <EntityNetworkD3
-          entities={networkData.nodes.map(n => ({ id: n.id, label: n.label, type: n.type }))}
+          entities={networkData.nodes.map(n => ({ id: n.id, label: n.label, type: n.type, weight: n.weight }))}
           connections={networkData.connections.map(c => ({
             source: c.source,
             target: c.target,
