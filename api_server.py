@@ -16,6 +16,9 @@ import logging
 import secrets
 
 from vermont_news_analyzer.modules.database import VermontSignalDatabase
+from vermont_news_analyzer.modules.network_layout import NetworkLayoutComputer
+from vermont_news_analyzer.modules.community_detection import CommunityDetector
+from vermont_news_analyzer.modules.centrality import CentralityCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +81,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],  # Only needed methods
+    allow_headers=["Authorization", "Content-Type"],  # Specific headers only
+    max_age=600,  # Cache preflight for 10 minutes
 )
 
 # Initialize database connection
@@ -564,7 +568,7 @@ def get_article_entity_network(
                     # Sort by: strength > cross-article count > confidence
                     sorted_edges = sorted(
                         edges,
-                        key=lambda e: (-e['strength'], -e['count'], -e['confidence'])
+                        key=lambda e: (-e['strength'], -e.get('raw_count', 0), -e['confidence'])
                     )
 
                     # Keep top k edges for this entity
@@ -604,6 +608,211 @@ def get_article_entity_network(
             'has_proximity_weights': any(r.get('proximity_weight', 0) > 0 for r in filtered_relationships)
         }
     }
+
+
+@app.get("/api/entities/network/article/{article_id}/layout")
+@limiter.limit("100/minute")
+def get_article_network_layout(
+    request: Request,
+    article_id: int,
+    width: int = Query(1200, ge=400, le=3000),
+    height: int = Query(600, ge=300, le=2000),
+    use_cache: bool = Query(True, description="Use cached layout if available"),
+    proximity_filter: str = Query('all', regex='^(all|same-sentence|adjacent|near)$'),
+    min_score: float = Query(0.0, ge=0.0, le=1.0),
+    detect_communities: bool = Query(True, description="Detect and color-code communities"),
+    community_resolution: float = Query(1.0, ge=0.1, le=2.0, description="Community detection resolution (higher = more communities)"),
+    compute_centrality: bool = Query(True, description="Compute PageRank centrality for node sizing"),
+    centrality_metric: str = Query('pagerank', regex='^(pagerank|betweenness|degree|eigenvector)$', description="Centrality metric to use")
+):
+    """
+    Get pre-computed network layout with node positions for faster rendering
+
+    Rate limit: 100 requests per minute per IP
+
+    Args:
+        article_id: Article ID
+        width: Viewport width (400-3000px)
+        height: Viewport height (300-2000px)
+        use_cache: Whether to use cached layout (default: True)
+        proximity_filter: Filter by proximity type (same as main endpoint)
+        min_score: Minimum NPMI/score threshold
+
+    Returns:
+        Network data with pre-computed node positions (x, y coordinates)
+    """
+    try:
+        # Initialize layout computer
+        layout_computer = NetworkLayoutComputer(db)
+
+        # Check cache first
+        cached_positions = None
+        if use_cache:
+            cached_positions = layout_computer.get_cached_layout(article_id, width, height)
+
+        # Get network data from existing endpoint logic
+        network_data = get_article_entity_network(
+            request,
+            article_id,
+            proximity_filter=proximity_filter,
+            min_score=min_score,
+            max_connections_per_entity=10
+        )
+
+        nodes = network_data['nodes']
+        edges = network_data['connections']
+
+        # Apply cached positions if available
+        if cached_positions:
+            # Merge positions into node data
+            for node in nodes:
+                node_id = node['id']
+                if node_id in cached_positions:
+                    x, y = cached_positions[node_id]
+                    node['x'] = x
+                    node['y'] = y
+
+            logger.info(f"Using cached layout for article {article_id}")
+            cache_status = 'hit'
+        else:
+            # Compute new layout
+            positions = layout_computer.compute_and_cache_article_layout(
+                article_id=article_id,
+                nodes=nodes,
+                edges=edges,
+                width=width,
+                height=height
+            )
+
+            # Merge positions into node data
+            for node in nodes:
+                node_id = node['id']
+                if node_id in positions:
+                    x, y = positions[node_id]
+                    node['x'] = x
+                    node['y'] = y
+
+            logger.info(f"Computed new layout for article {article_id}")
+            cache_status = 'miss'
+
+        # Optional: Detect communities and assign colors
+        communities_metadata = None
+        if detect_communities and len(nodes) >= 3:  # Need at least 3 nodes
+            try:
+                detector = CommunityDetector()
+
+                # Detect communities
+                node_to_community = detector.detect_communities(
+                    nodes=nodes,
+                    edges=edges,
+                    resolution=community_resolution,
+                    min_community_size=2
+                )
+
+                # Assign community colors
+                community_colors = detector.assign_community_colors(node_to_community)
+
+                # Add community info to nodes
+                for node in nodes:
+                    node['community_id'] = node_to_community.get(node['id'], -1)
+                    node['community_color'] = community_colors.get(node['id'], '#95a5a6')
+
+                # Get community metadata
+                communities_metadata = detector.get_community_metadata(
+                    nodes, edges, node_to_community
+                )
+
+                logger.info(f"Detected {len(communities_metadata)} communities for article {article_id}")
+
+            except Exception as e:
+                logger.warning(f"Community detection failed: {e}")
+                detect_communities = False  # Mark as failed
+
+        # Optional: Compute centrality metrics for intelligent node sizing
+        centrality_data = None
+        if compute_centrality and len(nodes) >= 2:  # Need at least 2 nodes
+            try:
+                calculator = CentralityCalculator()
+
+                # Compute selected centrality metric
+                if centrality_metric == 'pagerank':
+                    centrality_scores = calculator.calculate_pagerank(nodes, edges)
+                elif centrality_metric == 'betweenness':
+                    centrality_scores = calculator.calculate_betweenness(nodes, edges)
+                elif centrality_metric == 'degree':
+                    centrality_scores = calculator.calculate_degree_centrality(nodes, edges)
+                elif centrality_metric == 'eigenvector':
+                    centrality_scores = calculator.calculate_eigenvector_centrality(nodes, edges)
+                else:
+                    centrality_scores = calculator.calculate_pagerank(nodes, edges)
+
+                # Normalize scores to reasonable range for visual sizing (0.3 - 1.0)
+                normalized_scores = calculator.normalize_scores(centrality_scores, 0.3, 1.0)
+
+                # Add centrality to nodes
+                for node in nodes:
+                    node['centrality_score'] = normalized_scores.get(node['id'], 0.5)
+                    node['centrality_raw'] = centrality_scores.get(node['id'], 0.0)
+
+                # Get top nodes by centrality
+                top_nodes = calculator.rank_nodes(nodes, centrality_scores, top_k=10)
+
+                centrality_data = {
+                    'metric': centrality_metric,
+                    'computed': True,
+                    'top_nodes': [
+                        {'node_id': node_id, 'score': score}
+                        for node_id, score in top_nodes
+                    ]
+                }
+
+                logger.info(f"Computed {centrality_metric} centrality for article {article_id}")
+
+            except Exception as e:
+                logger.warning(f"Centrality computation failed: {e}")
+                compute_centrality = False  # Mark as failed
+
+        return {
+            'nodes': nodes,
+            'connections': edges,
+            'total_entities': len(nodes),
+            'total_relationships': len(edges),
+            'article_id': article_id,
+            'article_title': network_data.get('article_title', f'Article {article_id}'),
+            'view_type': 'article',
+            'layout': {
+                'width': width,
+                'height': height,
+                'pre_computed': True,
+                'cache_status': cache_status
+            },
+            'communities': {
+                'detected': detect_communities,
+                'count': len(communities_metadata) if communities_metadata else 0,
+                'metadata': communities_metadata or [],
+                'resolution': community_resolution if detect_communities else None
+            },
+            'centrality': centrality_data or {
+                'metric': centrality_metric,
+                'computed': False,
+                'top_nodes': []
+            },
+            'filtering_applied': network_data.get('filtering_applied', {}),
+            'metadata': network_data.get('metadata', {})
+        }
+
+    except ImportError as e:
+        logger.error(f"NetworkX not installed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Server-side layout computation requires NetworkX. Install with: pip install networkx"
+        )
+    except Exception as e:
+        logger.error(f"Layout computation failed for article {article_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to compute network layout: {str(e)}"
+        )
 
 
 @app.get("/api/entities/network/entity/{entity_name}")
