@@ -82,6 +82,15 @@ export interface EntityNode {
   weight?: number;
   mention_count?: number;
   relationship_count?: number;
+  // Pre-computed layout positions
+  x?: number;
+  y?: number;
+  // Community detection
+  community_id?: number;
+  community_color?: string;
+  // Centrality metrics
+  centrality_score?: number;
+  centrality_raw?: number;
 }
 
 export interface EntityConnection {
@@ -90,6 +99,11 @@ export interface EntityConnection {
   label: string;
   relationship_type: string;
   weight?: number;
+  // Relationship strength metrics
+  strength?: number;
+  npmi?: number;
+  proximity_weight?: number;
+  confidence?: number;
 }
 
 export interface EntityNetwork {
@@ -241,10 +255,19 @@ export async function getEntityNetwork(params?: {
 }
 
 /**
- * Get entity network for a single article (focused view)
+ * Get entity network for a single article with intelligent features
+ * Uses the /layout endpoint which automatically includes:
+ * - Pre-computed node positions (x, y) for fast rendering
+ * - Community detection and colors for grouping
+ * - PageRank centrality scores for intelligent node sizing
+ * - NPMI/proximity strength metrics for edge thickness
+ *
+ * All features are enabled by default on the backend.
  */
-export async function getArticleEntityNetwork(articleId: number): Promise<EntityNetwork> {
-  return apiFetch(`/entities/network/article/${articleId}`);
+export async function getArticleEntityNetwork(
+  articleId: number
+): Promise<EntityNetwork> {
+  return apiFetch(`/entities/network/article/${articleId}/layout`);
 }
 
 /**
